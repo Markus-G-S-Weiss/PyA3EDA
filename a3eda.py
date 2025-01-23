@@ -398,9 +398,33 @@ class DataProcessor(FileOperations):
 
     def _is_valid_path(self, relative_path: Path, catalysts: list,
                       reactant1: str, reactant2: str) -> bool:
-        """Check if the relative path contains any of the desired catalysts or reactants."""
+        """Check if the relative path contains any of the desired paths."""
         path_str = str(relative_path).lower()
-        return any(cat in path_str for cat in catalysts) or reactant1 in path_str or reactant2 in path_str
+        parts = [part.lower() for part in relative_path.parts]
+        
+        # Check for standard calculation paths
+        if any('no_cat' in part or 'nocat' in part for part in parts):
+            return True
+        if any(part in ['product', 'ts'] for part in parts):
+            return True
+        if any('frz_cat' in part or 'frz' in part or
+               'pol_cat' in part or 'pol' in part or 
+               'full_cat' in part or 'full' in part for part in parts):
+            return True
+            
+        # Check for catalysts
+        if any(cat in parts for cat in catalysts):
+            return True
+            
+        # Check for reactants
+        if reactant1 in path_str or reactant2 in path_str:
+            return True
+            
+        # Exclude unwanted directories (e.g., 'templates')
+        if 'templates' in parts:
+            return False
+            
+        return False
 
     def _extract_data(self, content: str) -> Optional[dict]:
         """Extract data from output file content."""
@@ -542,37 +566,44 @@ class DataExporter(FileOperations):
     def __init__(self, output_dir: Path):
         super().__init__(output_dir)
 
-    def save_method_basis_data(self, data_list: list, method_basis: str):
+    def save_method_basis_data(self, data_list: list, method_basis: str, output_dir: Path):
         """Save the extracted data for a method_basis to CSV."""
         if not data_list:
             logging.info(f"No data to save for '{method_basis}'")
             return
 
         df = pd.DataFrame(data_list)
-        self._ensure_required_columns(df)
-        csv_file = self.base_dir / f"{method_basis}.csv"
+        
+        # Ensure Method_Basis and Label are first columns
+        expected_columns = ['Method_Basis', 'Label']
+        
+        # Check if expected columns exist
+        for col in expected_columns:
+            if col not in df.columns:
+                logging.warning(f"Missing required column: {col}")
+                return
+                
+        # Reorder columns to put Method_Basis and Label first
+        other_cols = [col for col in df.columns if col not in expected_columns]
+        df = df[expected_columns + other_cols]
+        
+        # Create output file path
+        csv_file = output_dir / f"{method_basis}.csv"
         
         try:
+            csv_file.parent.mkdir(exist_ok=True)
             df.to_csv(csv_file, index=False)
             logging.info(f"Data for '{method_basis}' saved to '{csv_file}'")
         except Exception as e:
             logging.error(f"Failed to save data to '{csv_file}': {e}")
 
-    def _ensure_required_columns(self, df: pd.DataFrame):
-        """Ensure required columns exist and are properly ordered."""
-        expected_columns = ['Method_Basis', 'Label']
-        missing_columns = [col for col in expected_columns if col not in df.columns]
-        if not missing_columns:
-            cols = expected_columns + [col for col in df.columns if col not in expected_columns]
-            df.reindex(columns=cols)
-
 class EnergyProfileGenerator(FileOperations):
     """Class for generating energy profiles."""
-    def __init__(self, input_dir: Path, config: dict):
+    def __init__(self, input_dir: Path, profiles_dir: Path, config: dict):
         super().__init__(input_dir)
         self.config = config
-        self.profile_dir = input_dir / 'energy_profiles'
-        self.profile_dir.mkdir(exist_ok=True)
+        self.profiles_dir = profiles_dir
+        self.profiles_dir.mkdir(exist_ok=True)
 
     def generate_profiles(self):
         """
@@ -674,7 +705,7 @@ class EnergyProfileGenerator(FileOperations):
             profile_df = pd.DataFrame(profile_data)
 
             # Save to CSV in the 'energy_profiles' directory
-            output_csv = energy_profiles_dir / f"{method_basis}_profile.csv"
+            output_csv = self.profiles_dir / f"{method_basis}_profile.csv"
             profile_df.to_csv(output_csv, index=False)
             logging.info(f"Energy profile data for '{method_basis}' saved to '{output_csv}'")
 
@@ -899,6 +930,13 @@ class A3EDA:
         self.system_dir = Path.cwd()
         self.file_handler = FileHandler(self.system_dir)
         self.args = args
+        self.data_dir = self.system_dir / 'data'
+        self.raw_data_dir = self.data_dir / 'raw'
+        self.profiles_dir = self.data_dir / 'profiles'
+        # Create data directories
+        self.data_dir.mkdir(exist_ok=True)
+        self.raw_data_dir.mkdir(exist_ok=True)
+        self.profiles_dir.mkdir(exist_ok=True)
 
     @staticmethod
     def setup_logging(level: str):
@@ -932,19 +970,25 @@ class A3EDA:
     def _handle_extraction(self):
         """Handle data extraction."""
         processor = DataProcessor(self.config_manager.config, self.system_dir)
-        exporter = DataExporter(self.system_dir)
-        profile_generator = EnergyProfileGenerator(self.system_dir, self.config_manager.config)
+        exporter = DataExporter(self.raw_data_dir)  # Changed from system_dir
+        profile_generator = EnergyProfileGenerator(
+            self.raw_data_dir,  # Changed input directory to raw_data_dir
+            self.profiles_dir,  # Added profiles directory
+            self.config_manager.config
+        )
 
         for method in self.config_manager.config['methods']:
             for basis in self.config_manager.config['bases']:
                 method_basis = f"{method}_{basis}"
                 method_basis_dir = self.system_dir / FileHandler.sanitize_filename(method_basis)
+                output_dir = self.raw_data_dir / FileHandler.sanitize_filename(method_basis)
+                output_dir.mkdir(exist_ok=True)
                 
                 if method_basis_dir.is_dir():
                     logging.info(f"Processing method_basis: {method_basis}")
                     data_list = processor.process_files(method_basis_dir, method_basis)
                     if data_list:
-                        exporter.save_method_basis_data(data_list, method_basis)
+                        exporter.save_method_basis_data(data_list, method_basis, output_dir)
                     else:
                         logging.info(f"No data was extracted for '{method_basis}'")
                 else:
