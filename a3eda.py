@@ -105,11 +105,12 @@ class FileHandler(FileOperations):
                 logging.error(f'Missing template file: {tmpl}')
             sys.exit(1)
 
-    def create_directory_structure(self, paths: List[str]) -> None:
+    def create_directory_structure(self, base_dir: Path, paths: List[str]) -> None:
         """Create directory structures with sanitized path names."""
         for path in paths:
-            components = [FileHandler.sanitize_filename(p) for p in path.split('/')]
-            dir_path = self.base_dir / Path(*components)
+            # Split path and sanitize each component
+            components = [self.sanitize_filename(p) for p in path.split('/')]
+            dir_path = base_dir / Path(*components)
             dir_path.mkdir(parents=True, exist_ok=True)
 
 class ConfigManager:
@@ -374,26 +375,29 @@ class DataProcessor(FileOperations):
         }
         return patterns
 
-    def process_files(self, root_dir: Path, method_basis: str) -> list:
-        """Process files for a given method-basis combination."""
+    def process_files(self, root_dir: Path, method_basis: str, target_catalyst: str) -> list:
+        """Process files for a given method-basis combination and catalyst."""
         data_list = []
         catalysts = [c.lower() for c in self.config.get('catalysts', [])]
         reactant1 = self.config.get('reactant1', '').lower()
         reactant2 = self.config.get('reactant2', '').lower()
+        target_catalyst = target_catalyst.lower()
 
         for file_path in root_dir.rglob("*.out"):
             relative_path = file_path.relative_to(root_dir)
-            if not self._is_valid_path(relative_path, catalysts, reactant1, reactant2):
-                continue
-
-            content = self.read_file(file_path)
-            if content:
-                data = self._extract_data(content)
-                if data:
-                    calculation_label = Utilities.get_calculation_label(relative_path)
-                    data["Method_Basis"] = method_basis
-                    data["Label"] = calculation_label
-                    data_list.append(data)
+            path_str = str(relative_path).lower()
+            
+            # Include file if it's either nocat or matches the target catalyst
+            if ('no_cat' in path_str or 'nocat' in path_str or target_catalyst in path_str):
+                if self._is_valid_path(relative_path, catalysts, reactant1, reactant2):
+                    content = self.read_file(file_path)
+                    if content:
+                        data = self._extract_data(content)
+                        if data:
+                            calculation_label = Utilities.get_calculation_label(relative_path)
+                            #data["Method_Basis"] = method_basis
+                            data[f"{method_basis}"] = calculation_label
+                            data_list.append(data)
         return data_list
 
     def _is_valid_path(self, relative_path: Path, catalysts: list,
@@ -566,16 +570,17 @@ class DataExporter(FileOperations):
     def __init__(self, output_dir: Path):
         super().__init__(output_dir)
 
-    def save_method_basis_data(self, data_list: list, method_basis: str, output_dir: Path):
-        """Save the extracted data for a method_basis to CSV."""
+    def save_method_basis_data(self, data_list: list, filename: str):
+        """Save the extracted data to CSV."""
         if not data_list:
-            logging.info(f"No data to save for '{method_basis}'")
+            logging.info(f"No data to save for '{filename}'")
             return
 
         df = pd.DataFrame(data_list)
         
+        method_basis = "_".join(filename.split("_")[:-1])
         # Ensure Method_Basis and Label are first columns
-        expected_columns = ['Method_Basis', 'Label']
+        expected_columns = [f"{method_basis}"]#, 'Label']
         
         # Check if expected columns exist
         for col in expected_columns:
@@ -587,23 +592,23 @@ class DataExporter(FileOperations):
         other_cols = [col for col in df.columns if col not in expected_columns]
         df = df[expected_columns + other_cols]
         
-        # Create output file path
-        csv_file = output_dir / f"{method_basis}.csv"
+        # Create output file directly in raw_data_dir
+        csv_file = self.base_dir / f"{filename}.csv"
         
         try:
-            csv_file.parent.mkdir(exist_ok=True)
             df.to_csv(csv_file, index=False)
-            logging.info(f"Data for '{method_basis}' saved to '{csv_file}'")
+            logging.info(f"Data saved to '{csv_file}'")
         except Exception as e:
             logging.error(f"Failed to save data to '{csv_file}': {e}")
 
 class EnergyProfileGenerator(FileOperations):
     """Class for generating energy profiles."""
-    def __init__(self, input_dir: Path, profiles_dir: Path, config: dict):
+    def __init__(self, input_dir: Path, profiles_dir: Path, config: dict, catalyst: str):
         super().__init__(input_dir)
         self.config = config
         self.profiles_dir = profiles_dir
         self.profiles_dir.mkdir(exist_ok=True)
+        self.catalyst = catalyst
 
     def _get_energy_values(self, df: pd.DataFrame, path: str, stage: str) -> Tuple[Optional[float], Optional[float]]:
         """Get E and G values for a specific path and stage."""
@@ -792,34 +797,33 @@ class EnergyProfileGenerator(FileOperations):
 
     def generate_profiles(self):
         """Generate both raw and combined energy profiles."""
-        for csv_file in self.base_dir.rglob("*.csv"):
-            if csv_file.parent.name == 'profiles' or csv_file.name.endswith('_profile.csv'):
-                continue
+        for csv_file in self.base_dir.glob("*.csv"):
+            if self.catalyst.lower() in csv_file.stem.lower():
+                method_basis = "_".join(csv_file.stem.split("_")[:-1])  # Remove catalyst from name
+                df = pd.read_csv(csv_file)
 
-            df = pd.read_csv(csv_file)
-            method_basis = csv_file.stem
+                # Generate raw profile
+                raw_profile = self._generate_raw_profile(df, method_basis)
+                raw_output = self.profiles_dir / f"{csv_file.stem}_raw_profile.csv"
+                raw_profile.to_csv(raw_output, index=False)
+                logging.info(f"Raw energy profile saved to {raw_output}")
 
-            # Generate raw profile
-            raw_profile = self._generate_raw_profile(df, method_basis)
-            raw_output = self.profiles_dir / f"{method_basis}_raw_profile.csv"
-            raw_profile.to_csv(raw_output, index=False)
-            logging.info(f"Raw energy profile saved to {raw_output}")
-
-            # Generate combined profile
-            combined_data = self._create_combined_profile(raw_profile, method_basis)
-            if combined_data:
-                combined_df = pd.DataFrame(combined_data)
-                combined_output = self.profiles_dir / f"{method_basis}_combined_profile.csv"
-                combined_df.to_csv(combined_output, index=False)
-                logging.info(f"Combined energy profile saved to {combined_output}")
-            else:
-                logging.warning(f"No combined profile data generated for {method_basis}")
+                # Generate combined profile
+                combined_data = self._create_combined_profile(raw_profile, method_basis)
+                if combined_data:
+                    combined_df = pd.DataFrame(combined_data)
+                    combined_output = self.profiles_dir / f"{csv_file.stem}_combined_profile.csv"
+                    combined_df.to_csv(combined_output, index=False)
+                    logging.info(f"Combined energy profile saved to {combined_output}")
+                else:
+                    logging.warning(f"No combined profile data generated for {method_basis}")
 
 class InputGenerator(FileOperations):
     """Class for generating input files."""
     def __init__(self, config: dict, template_dir: Path):
         super().__init__(template_dir)
         self.config = config
+        self.system_dir = Path.cwd()
         self.file_handler = FileHandler(template_dir)
 
     def generate_inputs(self, overwrite_option: str, run_option: str):
@@ -831,166 +835,187 @@ class InputGenerator(FileOperations):
         reactant1 = self.config['reactant1']
         reactant2 = self.config['reactant2']
         
-        # Get sanitized names for paths
+        # Get sanitized names for paths 
         san_methods = [FileHandler.sanitize_filename(m) for m in methods]
         san_bases = [FileHandler.sanitize_filename(b) for b in bases]
         san_catalysts = [FileHandler.sanitize_filename(c) for c in catalysts]
         san_reactant1 = FileHandler.sanitize_filename(reactant1)
         san_reactant2 = FileHandler.sanitize_filename(reactant2)
         
-        system_dir = Path.cwd()
-        template_dir = system_dir / 'templates'
-
-        # Define template file names
-        rem_template_names = ['rem_base.rem', 'rem_full_cat.rem', 'rem_pol_cat.rem', 'rem_frz_cat.rem']
-        base_template_file = template_dir / 'base_template.in'
-
-        # Collect required templates
-        required_templates = [template_dir / 'rem' / name for name in rem_template_names]
-        required_templates.append(base_template_file)
-        required_templates.extend([template_dir / 'molecule' / fname for fname in [
-            f'{reactant1}.mol', f'{reactant2}.mol', 'no_cat_product.mol', 'no_cat_ts.mol']])
-        for catalyst in catalysts:
-            required_templates.extend([template_dir / 'molecule' / fname for fname in [
-                f'{catalyst}.mol',
-                f'{catalyst}_reactant.mol',
-                f'{catalyst}_product.mol',
-                f'{catalyst}_ts.mol']])
-        self.file_handler.verify_templates(required_templates)
-
-        # Read templates
-        def read_templates(template_files):
-            return {file.stem: self.read_file(file) for file in template_files}
-
-        rem_templates = [template_dir / 'rem' / name for name in rem_template_names]
-        rem_contents = read_templates(rem_templates)
-        rem_base_content = rem_contents['rem_base']
-
-        rem_additions = {
-            'full_cat': rem_contents['rem_full_cat'],
-            'pol_cat': rem_contents['rem_pol_cat'],
-            'frz_cat': rem_contents['rem_frz_cat'],
-        }
-
-        base_template_content = self.read_file(base_template_file)
-        molecule_dir = template_dir / 'molecule'
-
+        # Process each method-basis combination
         for method, san_method in zip(methods, san_methods):
             for basis, san_basis in zip(bases, san_bases):
-                method_basis = f'{san_method}_{san_basis}'
-                logging.info(f'Processing method-basis combination: {method_basis}')
-                method_basis_dir = system_dir / method_basis
+                method_basis_dir = self.system_dir / f'{san_method}_{san_basis}'
                 method_basis_dir.mkdir(exist_ok=True)
                 
-                # Use original names in rem_section content
-                rem_no_cat = rem_base_content.format(method=method, basis=basis, jobtype='{jobtype}')
-
-                # Generate no_cat inputs with sanitized paths
+                # Create no_cat directories
                 no_cat_dir = method_basis_dir / 'no_cat'
-                self.file_handler.create_directory_structure([
+                no_cat_paths = [
                     f'reactants/{san_reactant1}',
                     f'reactants/{san_reactant2}',
                     'product',
-                    'ts',
-                ])
-
-                # Generate and optionally execute inputs for no_cat calculations
-                no_cat_calcs = [
-                    (reactant1, no_cat_dir / f'reactants/{san_reactant1}/{san_reactant1}_opt.in', 'reactants'),
-                    (reactant2, no_cat_dir / f'reactants/{san_reactant2}/{san_reactant2}_opt.in', 'reactants'),
-                    ('no_cat_product', no_cat_dir / 'product/no_cat_product_opt.in', 'product'),
-                    ('no_cat_ts', no_cat_dir / 'ts/no_cat_ts_opt.in', 'ts'),
+                    'ts'
                 ]
-                for mol_name, input_file, calc_type in no_cat_calcs:
-                    mol_section = self.read_file(molecule_dir / f'{mol_name}.mol')
-                    
-                    # Determine overwrite decision
-                    out_file = input_file.with_suffix('.out')
-                    qchem = QChemCalculation(input_file)
-                    status, details = qchem.check_status()
-                    
-                    # Create new QChemCalculation instance with proper overwrite flag
-                    qchem = QChemCalculation(
-                        input_file, 
-                        overwrite=(overwrite_option == 'all' or overwrite_option == status)
-                    )
-                    
-                    qchem.write_input_file(
-                        mol_section, rem_no_cat, base_template_content, calc_type)
-                    if run_option:
-                        qchem.execute()
-
-                # Generate catalyst inputs
+                self.file_handler.create_directory_structure(no_cat_dir, no_cat_paths)
+                
+                # Create catalyst directories
                 for catalyst, san_catalyst in zip(catalysts, san_catalysts):
-                    logging.info(f'Processing catalyst: {catalyst}')
                     cat_dir = method_basis_dir / san_catalyst
-                    calc_types = ['full_cat', 'pol_cat', 'frz_cat']
-                    stages = ['reactants', 'product', 'ts']
+                    catalyst_paths = []
+                    for calc_type in ['full_cat', 'pol_cat', 'frz_cat']:
+                        catalyst_paths.extend([
+                            f'reactants/{san_reactant1}/{calc_type}',
+                            f'product/{calc_type}_product',
+                            f'ts/{calc_type}_ts'
+                        ])
+                    catalyst_paths.append(f'reactants/{san_catalyst}')
+                    self.file_handler.create_directory_structure(cat_dir, catalyst_paths)
 
-                    # Create directory structure
-                    paths = []
-                    for calc_type in calc_types:
-                        paths.append(f'reactants/{san_reactant1}/{calc_type}')
-                        paths.append(f'product/{calc_type}_product')
-                        paths.append(f'ts/{calc_type}_ts')
-                    paths.append(f'reactants/{san_catalyst}')
-                    self.file_handler.create_directory_structure(paths)
+                self._generate_calculation_inputs(
+                    method_basis_dir=method_basis_dir,
+                    method=method,
+                    basis=basis,
+                    catalysts=catalysts,
+                    reactant1=reactant1,
+                    reactant2=reactant2,
+                    overwrite_option=overwrite_option,
+                    run_option=run_option
+                )
 
-                    # Prepare molecule sections
-                    mol_sections = {}
-                    # Reactants
-                    catal_mol_react = self.read_file(molecule_dir / f'{catalyst}_reactant.mol')
-                    reactant1_mol = self.read_file(molecule_dir / f'{reactant1}.mol')
-                    mol_sections['reactants'] = f"{catal_mol_react}\n{reactant1_mol}"
-                    # Product
-                    catal_mol_prod = self.read_file(molecule_dir / f'{catalyst}_product.mol')
-                    no_cat_prod_mol = self.read_file(molecule_dir / 'no_cat_product.mol')
-                    mol_sections['product'] = f"{catal_mol_prod}\n{no_cat_prod_mol}"
-                    # TS
-                    catal_mol_ts = self.read_file(molecule_dir / f'{catalyst}_ts.mol')
-                    no_cat_ts_mol = self.read_file(molecule_dir / 'no_cat_ts.mol')
-                    mol_sections['ts'] = f"{catal_mol_ts}\n{no_cat_ts_mol}"
-                    # Catalyst optimization
-                    mol_sections['catalyst_opt'] = self.read_file(molecule_dir / f'{catalyst}.mol')
+    def _generate_calculation_inputs(self, method_basis_dir: Path, method: str, basis: str,
+                                   catalysts: List[str], reactant1: str, reactant2: str,
+                                   overwrite_option: str, run_option: str):
+        """Generate the actual input files."""
+        # Read templates
+        template_dir = self.system_dir / 'templates'
+        rem_base = self.read_file(template_dir / 'rem/rem_base.rem')
+        rem_additions = {
+            'full_cat': self.read_file(template_dir / 'rem/rem_full_cat.rem'),
+            'pol_cat': self.read_file(template_dir / 'rem/rem_pol_cat.rem'),
+            'frz_cat': self.read_file(template_dir / 'rem/rem_frz_cat.rem')
+        }
+        base_template_content = self.read_file(template_dir / 'base_template.in')
 
-                    # Generate and optionally execute input files for each stage and calc_type
-                    for stage in stages:
-                        for calc_type in calc_types:
-                            rem_section = f"{rem_no_cat}\n{rem_additions[calc_type]}"
-                            if stage == 'reactants':
-                                input_file = cat_dir / f'reactants/{san_reactant1}/{calc_type}/{san_reactant1}_{calc_type}_opt.in'
-                            else:
-                                input_file = cat_dir / f'{stage}/{calc_type}_{stage}/{stage}_{calc_type}_opt.in'
-                            mol_section = mol_sections[stage]
-                            
-                            # Determine overwrite decision
-                            out_file = input_file.with_suffix('.out')
-                            qchem = QChemCalculation(input_file)
-                            status, details = qchem.check_status()
-                            
-                            qchem = QChemCalculation(
-                                input_file,
-                                overwrite=(overwrite_option == 'all' or overwrite_option == status)
-                            )
-                            
-                            qchem.write_input_file(
-                                mol_section, rem_section, base_template_content, stage)
-                            if run_option:
-                                qchem.execute()
-                    # Catalyst optimization input
-                    catalyst_opt_file = cat_dir / f'reactants/{san_catalyst}/{san_catalyst}_opt.in'
-                    # Determine overwrite decision
-                    out_file = catalyst_opt_file.with_suffix('.out')
-                    qchem = QChemCalculation(catalyst_opt_file)
-                    status, details = qchem.check_status()
-                    qchem = QChemCalculation(
-                        catalyst_opt_file,
-                        overwrite=(overwrite_option == 'all' or overwrite_option == status)
-                    )
-                    qchem.write_input_file(
-                        mol_sections['catalyst_opt'], rem_no_cat, base_template_content, 'reactants')
-                    if run_option:
-                        qchem.execute()
+        # Format base REM section
+        rem_base_formatted = rem_base.format(method=method, basis=basis, jobtype='{jobtype}')
+
+        # Generate no_cat inputs
+        self._generate_no_cat_inputs(
+            method_basis_dir=method_basis_dir,
+            reactant1=reactant1,
+            reactant2=reactant2,
+            rem_base=rem_base_formatted,
+            base_template_content=base_template_content,  # Changed from base_template
+            template_dir=template_dir,
+            overwrite_option=overwrite_option,
+            run_option=run_option
+        )
+
+        # Generate catalyst inputs
+        for catalyst in catalysts:
+            self._generate_catalyst_inputs(
+                method_basis_dir=method_basis_dir,
+                catalyst=catalyst,
+                reactant1=reactant1,
+                rem_base=rem_base_formatted,
+                rem_additions=rem_additions,
+                base_template_content=base_template_content,  # Changed from base_template
+                template_dir=template_dir,
+                overwrite_option=overwrite_option,
+                run_option=run_option
+            )
+
+    def _generate_no_cat_inputs(self, method_basis_dir: Path, reactant1: str, reactant2: str, 
+                               rem_base: str, base_template_content: str, template_dir: Path, 
+                               overwrite_option: str, run_option: str):
+        """Generate no-catalyst input files."""
+        no_cat_dir = method_basis_dir / 'no_cat'
+        no_cat_calcs = [
+            (reactant1, no_cat_dir / f'reactants/{reactant1}/{reactant1}_opt.in', 'reactants'),
+            (reactant2, no_cat_dir / f'reactants/{reactant2}/{reactant2}_opt.in', 'reactants'),
+            ('no_cat_product', no_cat_dir / 'product/no_cat_product_opt.in', 'product'),
+            ('no_cat_ts', no_cat_dir / 'ts/no_cat_ts_opt.in', 'ts'),
+        ]
+        for mol_name, input_file, calc_type in no_cat_calcs:
+            mol_section = self.read_file(template_dir / 'molecule' / f'{mol_name}.mol')
+            
+            # Determine overwrite decision
+            out_file = input_file.with_suffix('.out')
+            qchem = QChemCalculation(input_file)
+            status, details = qchem.check_status()
+            
+            # Create new QChemCalculation instance with proper overwrite flag
+            qchem = QChemCalculation(
+                input_file, 
+                overwrite=(overwrite_option == 'all' or overwrite_option == status)
+            )
+            
+            qchem.write_input_file(
+                mol_section, rem_base, base_template_content, calc_type)
+            if run_option:
+                qchem.execute()
+
+    def _generate_catalyst_inputs(self, method_basis_dir: Path, catalyst: str, reactant1: str, rem_base: str, rem_additions: dict, base_template_content: str, template_dir: Path, overwrite_option: str, run_option: str):
+        """Generate catalyst-specific input files."""
+        cat_dir = method_basis_dir / catalyst
+        calc_types = ['full_cat', 'pol_cat', 'frz_cat']
+        stages = ['reactants', 'product', 'ts']
+
+        # Prepare molecule sections
+        mol_sections = {}
+        # Reactants
+        catal_mol_react = self.read_file(template_dir / 'molecule' / f'{catalyst}_reactant.mol')
+        reactant1_mol = self.read_file(template_dir / 'molecule' / f'{reactant1}.mol')
+        mol_sections['reactants'] = f"{catal_mol_react}\n{reactant1_mol}"
+        # Product
+        catal_mol_prod = self.read_file(template_dir / 'molecule' / f'{catalyst}_product.mol')
+        no_cat_prod_mol = self.read_file(template_dir / 'molecule' / 'no_cat_product.mol')
+        mol_sections['product'] = f"{catal_mol_prod}\n{no_cat_prod_mol}"
+        # TS
+        catal_mol_ts = self.read_file(template_dir / 'molecule' / f'{catalyst}_ts.mol')
+        no_cat_ts_mol = self.read_file(template_dir / 'molecule' / 'no_cat_ts.mol')
+        mol_sections['ts'] = f"{catal_mol_ts}\n{no_cat_ts_mol}"
+        # Catalyst optimization
+        mol_sections['catalyst_opt'] = self.read_file(template_dir / 'molecule' / f'{catalyst}.mol')
+
+        # Generate and optionally execute input files for each stage and calc_type
+        for stage in stages:
+            for calc_type in calc_types:
+                rem_section = f"{rem_base}\n{rem_additions[calc_type]}"
+                if stage == 'reactants':
+                    input_file = cat_dir / f'reactants/{reactant1}/{calc_type}/{reactant1}_{calc_type}_opt.in'
+                else:
+                    input_file = cat_dir / f'{stage}/{calc_type}_{stage}/{stage}_{calc_type}_opt.in'
+                mol_section = mol_sections[stage]
+                
+                # Determine overwrite decision
+                out_file = input_file.with_suffix('.out')
+                qchem = QChemCalculation(input_file)
+                status, details = qchem.check_status()
+                
+                qchem = QChemCalculation(
+                    input_file,
+                    overwrite=(overwrite_option == 'all' or overwrite_option == status)
+                )
+                
+                qchem.write_input_file(
+                    mol_section, rem_section, base_template_content, stage)
+                if run_option:
+                    qchem.execute()
+        # Catalyst optimization input
+        catalyst_opt_file = cat_dir / f'reactants/{catalyst}/{catalyst}_opt.in'
+        # Determine overwrite decision
+        out_file = catalyst_opt_file.with_suffix('.out')
+        qchem = QChemCalculation(catalyst_opt_file)
+        status, details = qchem.check_status()
+        qchem = QChemCalculation(
+            catalyst_opt_file,
+            overwrite=(overwrite_option == 'all' or overwrite_option == status)
+        )
+        qchem.write_input_file(
+            mol_sections['catalyst_opt'], rem_base, base_template_content, 'reactants')
+        if run_option:
+            qchem.execute()
 
 class StatusChecker(FileOperations):
     """Class for checking calculation statuses."""
@@ -1036,10 +1061,14 @@ class A3EDA:
         self.system_dir = Path.cwd()
         self.file_handler = FileHandler(self.system_dir)
         self.args = args
+        
+        # Only set up data directories as attributes, don't create them yet
         self.data_dir = self.system_dir / 'data'
         self.raw_data_dir = self.data_dir / 'raw'
         self.profiles_dir = self.data_dir / 'profiles'
-        # Create data directories
+
+    def _create_data_directories(self):
+        """Create data directories if they don't exist."""
         self.data_dir.mkdir(exist_ok=True)
         self.raw_data_dir.mkdir(exist_ok=True)
         self.profiles_dir.mkdir(exist_ok=True)
@@ -1075,33 +1104,39 @@ class A3EDA:
 
     def _handle_extraction(self):
         """Handle data extraction."""
+        # Create directories only when extraction is requested
+        self._create_data_directories()
+        
         processor = DataProcessor(self.config_manager.config, self.system_dir)
-        exporter = DataExporter(self.raw_data_dir)  # Changed from system_dir
-        profile_generator = EnergyProfileGenerator(
-            self.raw_data_dir,  # Changed input directory to raw_data_dir
-            self.profiles_dir,  # Added profiles directory
-            self.config_manager.config
-        )
+        exporter = DataExporter(self.raw_data_dir)
 
-        for method in self.config_manager.config['methods']:
-            for basis in self.config_manager.config['bases']:
-                method_basis = f"{method}_{basis}"
-                method_basis_dir = self.system_dir / FileHandler.sanitize_filename(method_basis)
-                output_dir = self.raw_data_dir / FileHandler.sanitize_filename(method_basis)
-                output_dir.mkdir(exist_ok=True)
-                
-                if method_basis_dir.is_dir():
-                    logging.info(f"Processing method_basis: {method_basis}")
-                    data_list = processor.process_files(method_basis_dir, method_basis)
-                    if data_list:
-                        exporter.save_method_basis_data(data_list, method_basis, output_dir)
+        # Process each catalyst separately
+        for catalyst in self.config_manager.config['catalysts']:
+            for method in self.config_manager.config['methods']:
+                for basis in self.config_manager.config['bases']:
+                    method_basis = f"{method}_{basis}"
+                    method_basis_dir = self.system_dir / FileHandler.sanitize_filename(method_basis)
+                    
+                    if method_basis_dir.is_dir():
+                        logging.info(f"Processing method_basis: {method_basis} for catalyst: {catalyst}")
+                        data_list = processor.process_files(method_basis_dir, method_basis, catalyst)
+                        if data_list:
+                            # Include catalyst in filename
+                            filename = f"{method_basis}_{FileHandler.sanitize_filename(catalyst)}"
+                            exporter.save_method_basis_data(data_list, filename)
+                        else:
+                            logging.info(f"No data was extracted for '{method_basis}' with catalyst '{catalyst}'")
                     else:
-                        logging.info(f"No data was extracted for '{method_basis}'")
-                else:
-                    logging.warning(f"Directory '{method_basis_dir}' does not exist. Skipping.")
+                        logging.warning(f"Directory '{method_basis_dir}' does not exist. Skipping.")
 
-        # Generate energy profiles after processing all files
-        profile_generator.generate_profiles()
+            # Generate energy profiles for this catalyst
+            profile_generator = EnergyProfileGenerator(
+                self.raw_data_dir,
+                self.profiles_dir,
+                self.config_manager.config,
+                catalyst
+            )
+            profile_generator.generate_profiles()
 
     def _handle_status_check(self):
         """Handle status checking."""
@@ -1165,4 +1200,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
