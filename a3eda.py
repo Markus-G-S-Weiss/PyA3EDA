@@ -608,7 +608,7 @@ class EnergyProfileGenerator(FileOperations):
         self.config = config
         self.profiles_dir = profiles_dir
         self.profiles_dir.mkdir(exist_ok=True)
-        self.catalyst = catalyst
+        self.catalyst = catalyst.lower()
 
     def _get_energy_values(self, df: pd.DataFrame, path: str, stage: str) -> Tuple[Optional[float], Optional[float]]:
         """Get E and G values for a specific path and stage."""
@@ -618,14 +618,12 @@ class EnergyProfileGenerator(FileOperations):
                    matching_rows['G (kcal/mol)'].iloc[0])
         return None, None
 
-    def _create_combined_profile(self, df: pd.DataFrame, method_basis: str) -> List[dict]:
-        """Create profile with combined energies."""
+    def _create_combined_profile(self, df: pd.DataFrame, method_basis: str, cat: str) -> List[dict]:
         combined_data = []
-        cat = self.config['catalysts'][0].lower()  # Assuming single catalyst
+        # catalysts = [c.lower() for c in self.config.get('catalysts', [])]
         r1 = self.config['reactant1'].lower()
         r2 = self.config['reactant2'].lower()
 
-        # Define combinations and their components
         combinations = [
             {
                 'name': f"{cat}+{r1}+{r2}",
@@ -636,24 +634,21 @@ class EnergyProfileGenerator(FileOperations):
                 ]
             },
             {
-                'name': f"Frz-{cat}-{r1}+{r2}",
+                'name': f"Frz-{cat}-{r1}-{r2}",
                 'components': [
-                    {'path': 'frz', 'stage': 'Reactants'},
-                    {'path': r2, 'stage': 'Reactants'}
+                    {'path': 'frz', 'stage': 'Reactants'}
                 ]
             },
             {
-                'name': f"Pol-{cat}-{r1}+{r2}",
+                'name': f"Pol-{cat}-{r1}-{r2}",
                 'components': [
-                    {'path': 'pol', 'stage': 'Reactants'},
-                    {'path': r2, 'stage': 'Reactants'}
+                    {'path': 'pol', 'stage': 'Reactants'}
                 ]
             },
             {
-                'name': f"Full-{cat}-{r1}+{r2}",
+                'name': f"Full-{cat}-{r1}-{r2}",
                 'components': [
-                    {'path': 'full', 'stage': 'Reactants'},
-                    {'path': r2, 'stage': 'Reactants'}
+                    {'path': 'full', 'stage': 'Reactants'}
                 ]
             },
             {
@@ -708,12 +703,10 @@ class EnergyProfileGenerator(FileOperations):
             }
         ]
 
-        # Calculate combined energies
         for combo in combinations:
             e_sum = 0.0
             g_sum = 0.0
             all_components_found = True
-            
             for component in combo['components']:
                 e_val, g_val = self._get_energy_values(df, component['path'], component['stage'])
                 if e_val is None or g_val is None:
@@ -722,7 +715,6 @@ class EnergyProfileGenerator(FileOperations):
                     break
                 e_sum += e_val
                 g_sum += g_val
-            
             if all_components_found:
                 combined_data.append({
                     'Structure': combo['name'],
@@ -797,26 +789,26 @@ class EnergyProfileGenerator(FileOperations):
 
     def generate_profiles(self):
         """Generate both raw and combined energy profiles."""
+        # Only process CSV files matching this catalyst
         for csv_file in self.base_dir.glob("*.csv"):
-            if self.catalyst.lower() in csv_file.stem.lower():
-                method_basis = "_".join(csv_file.stem.split("_")[:-1])  # Remove catalyst from name
+            if self.catalyst in csv_file.stem.lower():
+                method_basis = "_".join(csv_file.stem.split("_")[:-1])
                 df = pd.read_csv(csv_file)
 
-                # Generate raw profile
                 raw_profile = self._generate_raw_profile(df, method_basis)
                 raw_output = self.profiles_dir / f"{csv_file.stem}_raw_profile.csv"
                 raw_profile.to_csv(raw_output, index=False)
                 logging.info(f"Raw energy profile saved to {raw_output}")
 
                 # Generate combined profile
-                combined_data = self._create_combined_profile(raw_profile, method_basis)
+                combined_data = self._create_combined_profile(raw_profile, method_basis, self.catalyst)
                 if combined_data:
                     combined_df = pd.DataFrame(combined_data)
                     combined_output = self.profiles_dir / f"{csv_file.stem}_combined_profile.csv"
                     combined_df.to_csv(combined_output, index=False)
                     logging.info(f"Combined energy profile saved to {combined_output}")
                 else:
-                    logging.warning(f"No combined profile data generated for {method_basis}")
+                    logging.warning(f"No combined profile data generated for {csv_file.stem}")
 
 class InputGenerator(FileOperations):
     """Class for generating input files."""
