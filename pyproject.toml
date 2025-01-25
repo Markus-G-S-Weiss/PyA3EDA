@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "a3eda"
+version = "1.0.0"
+description = "Automated Analysis of Electronic Structure Data"
+authors = [
+    { name = "Markus-G-S-Weiss", email = "markus.guenter.weiss@rwth-aachen.de" },
+]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "pandas",
+    "pyyaml",
+]
+
+[project.scripts]
+a3eda = "a3eda.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/a3eda"]
