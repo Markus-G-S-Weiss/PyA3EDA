@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "a3eda"
-version = "1.0.0"
+version = "0.0.1"
 description = "Automated Analysis of Electronic Structure Data"
 authors = [
     { name = "Markus-G-S-Weiss", email = "markus.guenter.weiss@rwth-aachen.de" },
