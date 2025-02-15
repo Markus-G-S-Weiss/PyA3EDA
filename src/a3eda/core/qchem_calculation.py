@@ -21,7 +21,7 @@ class QChemCalculation(FileOperations):
         logging.info(f'Executing qqchem for {self.input_file}')
         try:
             subprocess.run(
-                ['qqchem', '-c', '16', '-t', '4-00:00:00', self.input_file.name],
+                ['qqchem', '-c', '16', '-t', '10-00:00:00', '-x', 'compute-2-09-05',  self.input_file.name],
                 check=True,
                 cwd=self.input_file.parent
             )
