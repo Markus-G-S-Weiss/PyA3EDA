@@ -1,1 +1,0 @@
-"""Core functionality for A3EDA package."""
