@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "a3eda"
+name = "PyA3EDA"
 version = "0.0.1"
-description = "Automated Analysis of Electronic Structure Data"
+description = "Python Automatization of Automated Analysis of Electronic Structure Data"
 authors = [
     { name = "Markus-G-S-Weiss", email = "markus.guenter.weiss@rwth-aachen.de" },
 ]
@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-a3eda = "a3eda.cli:main"
+pya3eda = "PyA3EDA.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/a3eda"]
+packages = ["src/PyA3EDA"]
