@@ -39,4 +39,4 @@ def sanitize_filename(name: str) -> str:
         name = name.replace(old, new)
     # Optionally, remove any remaining non-alphanumeric characters.
     # name = re.sub(r'[^A-Za-z0-9\-_]+', '_', name)
-    return name.strip('_').lower()
+    return name.strip('_')

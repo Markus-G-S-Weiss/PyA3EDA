@@ -25,4 +25,7 @@ def parse_arguments():
                         help="Execute input files based on their status")
     parser.add_argument("-e", "--extract", action="store_true",
                         help="Extract data from output files and generate energy profiles")
+    parser.add_argument("--sp-strategy", type=str, default="smart",
+                        choices=["always", "smart", "never"],
+                        help="Control SP file generation: 'always' (always generate), 'smart' (only when opt output exists), 'never' (skip SP files)")
     return parser.parse_args()

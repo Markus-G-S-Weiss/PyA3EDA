@@ -15,7 +15,7 @@ def main() -> None:
     logging.basicConfig(level=numeric_level, format="%(asctime)s - %(levelname)s - %(message)s")
     
     config_manager = ConfigManager(args.yaml_config)
-    workflow = WorkflowManager(config_manager)
+    workflow = WorkflowManager(config_manager, args)
     
     if args.generate:
         workflow.generate_inputs()
