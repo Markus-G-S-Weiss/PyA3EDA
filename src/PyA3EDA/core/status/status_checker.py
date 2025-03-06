@@ -9,6 +9,7 @@ and printing formatted reports with intermediate group summaries and an overall 
 import logging
 from pathlib import Path
 from typing import Tuple, Iterator, Dict, List
+from PyA3EDA.core.constants import Constants
 from PyA3EDA.core.utils.file_utils import read_text
 from PyA3EDA.core.parsers.qchem_status_parser import parse_qchem_status
 from PyA3EDA.core.builders import builder
@@ -24,6 +25,8 @@ if not summary_logger.handlers:
 def iter_status_input_paths(config: dict, system_dir: Path) -> Iterator[Path]:
     """
     Yields expected Q-Chem input paths using the builder's iterator.
+    Builder.iter_input_paths now yields both opt and, if enabled (sp.enabled True),
+    the corresponding single-point (SP) input file paths.
     """
     yield from builder.iter_input_paths(config, system_dir)
 
@@ -35,59 +38,143 @@ def get_status_for_file(input_file: Path) -> Tuple[str, str]:
     error_file = input_file.with_suffix('.err')
     content = read_text(output_file) if output_file.exists() else ""
     err_content = read_text(error_file) if error_file.exists() else ""
-    return parse_qchem_status(content, err_content)
+    
+    # Check if job is still running based on submission file
+    input_stem = input_file.stem
+    submission_pattern = f"{input_stem}.in_[0-9]*.[0-9]*"
+    submission_exists = bool(list(input_file.parent.glob(submission_pattern)))
+    
+    return parse_qchem_status(content, err_content, submission_exists)
+
+def should_process_file(input_file: Path, criteria: str) -> Tuple[bool, str]:
+    """
+    Determine if a file should be processed based on criteria.
+    
+    Args:
+        input_file: Path to the input file
+        criteria: Criteria for processing ("all", "nofile", or status name)
+        
+    Returns:
+        Tuple[bool, str]: (should_process, reason)
+    """
+    if not input_file.exists():
+        return False, "File doesn't exist"
+        
+    if criteria is None:
+        return False, "No criteria specified"
+        
+    if criteria.lower() == "all":
+        return True, "Process all"
+        
+    if criteria.lower() == "nofile":
+        output_file = input_file.with_suffix('.out')
+        if not output_file.exists():
+            return True, "Output file doesn't exist"
+        return False, "Output file exists"
+    
+    # Get the actual status
+    status, details = get_status_for_file(input_file)
+    if status.lower() == criteria.lower():
+        return True, f"Status match: {status}"
+    
+    return False, f"Status mismatch: {status} ≠ {criteria}"
 
 def group_paths_by_method_basis(paths: List[Path], system_dir: Path) -> Dict[str, List[Path]]:
     """
-    Groups the given paths by the first folder in their relative path (assumed to be {method}_{basis}).
+    Groups paths by first folder with proper dispersion formatting.
     """
-    groups: Dict[str, List[Path]] = {}
+    # Maps for unsanitizing and dispersion format
+    reverse_map = {s: o for o, s in Constants.ESCAPE_MAP.items()}
+    disp_map = {
+        'empirical_grimme': 'D2', 'empirical_chg': 'CHG', 'empirical_grimme3': 'D3(0)',
+        'd3_zero': 'D3(0)', 'd3_bj': 'D3(BJ)', 'd3_cso': 'D3(CSO)', 'd3_zerom': 'D3M(0)', 
+        'd3_bjm': 'D3M(BJ)', 'd3_op': 'D3(op)', 'd3': 'D3', 'd4': 'D4'
+    }
+    
+    groups = {}
     for path in paths:
-        rel_parts = path.relative_to(system_dir).parts
-        key = rel_parts[0] if rel_parts else "unknown"
-        groups.setdefault(key, []).append(path)
+        # Handle paths with no parts
+        if not (parts := path.relative_to(system_dir).parts):
+            groups.setdefault("unknown", []).append(path)
+            continue
+            
+        # Unsanitize folder name
+        folder = parts[0]
+        for s, o in reverse_map.items():
+            folder = folder.replace(s, o)
+        
+        # Get method and remaining parts
+        method, *rest_parts = folder.split('_', 1) + ['']
+        rest = rest_parts[0]
+        
+        # Format the key
+        if rest:
+            # Check for dispersion methods
+            disp_found = False
+            for disp_key, disp_format in disp_map.items():
+                if rest.lower().startswith(disp_key):
+                    # Get remaining part after dispersion
+                    remaining = rest[len(disp_key):].lstrip('_').replace('_', '/') 
+                    key = f"{method}-{disp_format}"
+                    if remaining:
+                        key += f"/{remaining}"
+                    disp_found = True
+                    break
+                    
+            if not disp_found:
+                key = f"{method}/{rest.replace('_', '/')}"
+        else:
+            key = method
+            
+        # Add to group (removing any "/false" parts)
+        groups.setdefault(key.replace('/false', ''), []).append(path)
+    
     return groups
 
 def print_group_status(group_key: str, paths: List[Path], system_dir: Path) -> Dict[str, int]:
     """
-    Checks statuses for paths in this group, prints a formatted report,
-    and returns a summary dictionary of status counts for the group.
+    Checks statuses for paths in this group, prints a formatted report including the calculation mode
+    (OPT or SP), and returns a summary dictionary of status counts for the group.
     """
+    header_text = "Input File (rel)"
     max_path_length = max(
-        len(str(path.relative_to(system_dir).parent / path.stem))
-        for path in paths
+        max(len(str(path.relative_to(system_dir).parent / path.stem)) for path in paths),
+        len(header_text)
     )
-    format_str = f"{{:<{max_path_length}}} | {{:<10}} | {{}}"
+    # Format string with fixed widths for each column.
+    format_str = f"{{:<{max_path_length}}} | {{:<6}} | {{:<10}} | {{}}"
     group_counts: Dict[str, int] = {}
 
     boundary_line = "-" * 60
-    # Print a larger header block for the group using the summary_logger.
     summary_logger.info(f"\n{boundary_line}")
     summary_logger.info(f"{' ' * 8}GROUP: {group_key}")
+    summary_logger.info(boundary_line)
+    summary_logger.info(format_str.format(header_text, "Mode", "Status", "Details"))
     summary_logger.info(boundary_line)
 
     for path in paths:
         relative_path = path.relative_to(system_dir).parent / path.stem
+        mode = "SP" if path.stem.endswith("_sp") else "OPT"
         if path.exists():
             status, details = get_status_for_file(path)
         else:
             status, details = 'absent', 'Input file not found'
         group_counts[status] = group_counts.get(status, 0) + 1
-        logging.info(format_str.format(str(relative_path), status, details))
+        # Use summary_logger to ensure uniform formatting.
+        summary_logger.info(format_str.format(str(relative_path), mode, status, details))
 
-    # Print intermediate group summary with indentation.
     summary_logger.info(f"\n{' ' * 4}Summary for {group_key}:")
     for s, count in group_counts.items():
         summary_logger.info(f"    {s} : {count}")
-    # summary_logger.info(boundary_line)
     return group_counts
 
 def check_all_statuses(config: dict, system_dir: Path) -> None:
     """
     Iterates over expected input paths (grouped by method_basis), checks their statuses on the fly,
     prints a formatted report for each group along with an intermediate summary, and finally prints
-    an overall status summary using the simpler summary logger.
+    an overall status summary.
     """
+    logging.info(f"Status checking started:")
     paths = list(iter_status_input_paths(config, system_dir))
     if not paths:
         logging.info("No input paths available for status checking.")
@@ -109,3 +196,4 @@ def check_all_statuses(config: dict, system_dir: Path) -> None:
     for s, count in overall_counts.items():
         summary_logger.info(f"    {s} : {count}")
     summary_logger.info(boundary_line)
+    logging.info(f"Status checking finished.")

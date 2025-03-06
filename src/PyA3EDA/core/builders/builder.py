@@ -3,63 +3,92 @@ File Builder Module
 
 This module centralizes the logic for constructing the directory structure and complete
 Q-Chem input files based on a sanitized configuration and template files.
+It produces a folder tree structured as described by the processed configuration.
 It produces a folder tree structured as follows:
 
-  {Method}_{Basis}/
-  ├── no_cat/
-  │   ├── reactants/
-  │   │   ├── {Reactant1}/
-  │   │   │   └── {Reactant1}_opt.in
-  │   │   ├── {Reactant2}/
-  │   │   │   └── {Reactant2}_opt.in
-  │   │   └── {Reactant1}-{Reactant2}/
-  │   │       └── {Reactant1}-{Reactant2}_opt.in
-  │   ├── products/
-  │   │   ├── {Product1}/
-  │   │   │   └── {Product1}_opt.in
-  │   │   └── {Product2}/
-  │       └── {Product2}_opt.in
-  │   └── ts/
-  │       └── tscomplex.in
-  └── {Catalyst}/
-      ├── preTS/
-      │   ├── {Catalyst}-{Reactant1}/
-      │   │   ├── full_cat/
-      │   │   │   └── preTS_{Catalyst}-{Reactant1}_full_cat_opt.in
-      │   │   ├── pol_cat/
-      │   │   │   └── preTS_{Catalyst}-{Reactant1}_pol_cat_opt.in
-      │   │   └── frz_cat/
-      │   │       └── preTS_{Catalyst}-{Reactant1}_frz_cat_opt.in
-      │   ├── {Catalyst}-{Reactant2}/
-      │   │   ├── full_cat/
-      │   │   │   └── preTS_{Catalyst}-{Reactant2}_full_cat_opt.in
-      │   │   ├── pol_cat/
-      │   │   │   └── preTS_{Catalyst}-{Reactant2}_pol_cat_opt.in
-      │   │   └── frz_cat/
-      │   │       └── preTS_{Catalyst}-{Reactant2}_frz_cat_opt.in
-      │   └── {Catalyst}-{Reactant1}-{Reactant2}/
-      │       ├── full_cat/
-      │       │   └── preTS_{Catalyst}-{Reactant1}-{Reactant2}_full_cat_opt.in
-      │       ├── pol_cat/
-      │       │   └── preTS_{Catalyst}-{Reactant1}-{Reactant2}_pol_cat_opt.in
-      │       └── frz_cat/
-      │           └── preTS_{Catalyst}-{Reactant1}-{Reactant2}_frz_cat_opt.in
-      ├── postTS/
-      │   └── {Catalyst}-{Product1}/
-      │       ├── full_cat/
-      │       │   └── postTS_{Catalyst}-{Product1}_full_cat_opt.in
-      │       ├── pol_cat/
-      │       │   └── postTS_{Catalyst}-{Product1}_pol_cat_opt.in
-      │       └── frz_cat/
-      │           └── postTS_{Catalyst}-{Product1}_frz_cat_opt.in
-      └── ts/
-           ├── full_cat/
-           │   └── ts_{Catalyst}-tscomplex_full_opt.in
-           ├── pol_cat/
-           │   └── ts_{Catalyst}-tscomplex_pol_opt.in
-           └── frz_cat/
-               └── ts_{Catalyst}-tscomplex_frz_opt.in
-
+    {opt_method}_{opt_dispersion}_{opt_basis}_{opt_solvent}/
+    ├── no_cat/
+    │   ├── reactants/
+    │   │   ├── {Reactant1}/
+    │   │   │   ├── {Reactant1}_opt.in
+    │   │   │   └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+    │   │   │         └── {Reactant1}_sp.in
+    │   │   ├── {Reactant2}/
+    │   │   │   ├── {Reactant2}_opt.in
+    │   │   │   └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+    │   │   │         └── {Reactant2}_sp.in
+    │   │   └── {Reactant1}-{Reactant2}/
+    │   │         ├── {Reactant1}-{Reactant2}_opt.in
+    │   │         └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+    │   │               └── {Reactant1}-{Reactant2}_sp.in
+    │   ├── products/
+    │   │   ├── {Product1}/
+    │   │   │   ├── {Product1}_opt.in
+    │   │   │   └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+    │   │   │         └── {Product1}_sp.in
+    │   │   └── {Product2}/
+    │   │         ├── {Product2}_opt.in
+    │   │         └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+    │   │               └── {Product2}_sp.in
+    │   └── ts/
+    │         ├── tscomplex_opt.in
+    │         └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+    │               └── tscomplex_sp.in
+    └── {Catalyst}/
+        ├── preTS/
+        │   ├── {Catalyst}-{Reactant1}/
+        │   │   ├── full_cat/
+        │   │   │   ├── preTS_{Catalyst}-{Reactant1}_full_cat_opt.in
+        │   │   │   └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+        │   │   │         └── preTS_{Catalyst}-{Reactant1}_full_cat_sp.in
+        │   │   ├── pol_cat/
+        │   │   │   ├── preTS_{Catalyst}-{Reactant1}_pol_cat_opt.in
+        │   │   │   └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+        │   │   │         └── preTS_{Catalyst}-{Reactant1}_pol_cat_sp.in
+        │   │   └── frz_cat/
+        │   │       ├── preTS_{Catalyst}-{Reactant1}_frz_cat_opt.in
+        │   │       └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+        │   │             └── preTS_{Catalyst}-{Reactant1}_frz_cat_sp.in
+        │   └── {Catalyst}-{Reactant1}-{Reactant2}/
+        │         ├── full_cat/
+        │         │   ├── preTS_{Catalyst}-{Reactant1}-{Reactant2}_full_cat_opt.in
+        │         │   └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+        │         │         └── preTS_{Catalyst}-{Reactant1}-{Reactant2}_full_cat_sp.in
+        │         ├── pol_cat/
+        │         │   ├── preTS_{Catalyst}-{Reactant1}-{Reactant2}_pol_cat_opt.in
+        │         │   └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+        │         │         └── preTS_{Catalyst}-{Reactant1}-{Reactant2}_pol_cat_sp.in
+        │         └── frz_cat/
+        │               ├── preTS_{Catalyst}-{Reactant1}-{Reactant2}_frz_cat_opt.in
+        │               └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+        │                     └── preTS_{Catalyst}-{Reactant1}-{Reactant2}_frz_cat_sp.in
+        ├── postTS/
+        │   └── {Catalyst}-{Product1}/
+        │         ├── full_cat/
+        │         │   ├── postTS_{Catalyst}-{Product1}_full_cat_opt.in
+        │         │   └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+        │         │         └── postTS_{Catalyst}-{Product1}_full_cat_sp.in
+        │         ├── pol_cat/
+        │         │   ├── postTS_{Catalyst}-{Product1}_pol_cat_opt.in
+        │         │   └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+        │         │         └── postTS_{Catalyst}-{Product1}_pol_cat_sp.in
+        │         └── frz_cat/
+        │               ├── postTS_{Catalyst}-{Product1}_frz_cat_opt.in
+        │               └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+        │                     └── postTS_{Catalyst}-{Product1}_frz_cat_sp.in
+        └── ts/
+            ├── full_cat/
+            │   ├── ts_{Catalyst}-tscomplex_full_opt.in
+            │   └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+            │         └── ts_{Catalyst}-tscomplex_full_sp.in
+            ├── pol_cat/
+            │   ├── ts_{Catalyst}-tscomplex_pol_opt.in
+            │   └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+            │         └── ts_{Catalyst}-tscomplex_pol_sp.in
+            └── frz_cat/
+                    ├── ts_{Catalyst}-tscomplex_frz_opt.in
+                    └── {sp_method}_{sp_dispersion}_{sp_basis}_{sp_solvent}_sp/
+                        └── ts_{Catalyst}-tscomplex_frz_sp.in
 The module uses molecule builder routines (both standard and fragmented)
 to generate the Q-Chem input file content before writing them to disk.
 """
@@ -70,347 +99,549 @@ from itertools import combinations
 from PyA3EDA.core.utils.file_utils import read_text, write_text
 from PyA3EDA.core.builders.molecule_builder import (
     build_standard_molecule_section, 
-    build_fragmented_molecule_section
+    build_fragmented_molecule_section,
+    build_sp_standard_molecule_section,
+    build_sp_fragmented_molecule_section
 )
 from PyA3EDA.core.builders import rem_builder
 
-def build_file_path(system_dir: Path, method: str, basis: str, category: str,
-                    branch: str, species: str, calc_type: str, catalyst_name: str = "") -> Path:
+
+def get_molecule_section(template: str, molecule_processing_fn, species: str, catalyst: str=None,
+                         mode: str="opt", opt_output_path: Path=None) -> str:
     """
-    Constructs the full file path and ensures that all necessary directories exist.
+    Returns the molecule section of the input file.
+    
+    For mode "sp", uses the provided opt_output_path to read the corresponding opt output file.
+    
+    Args:
+        template: Template string for the molecule section
+        molecule_processing_fn: Function to process the molecule section
+        species: Species name
+        catalyst: Catalyst name (optional)
+        mode: Mode ("opt" or "sp")
+        opt_output_path: Path to the optimization output file (required for sp mode)
+        
+    Returns:
+        Processed molecule section string
     """
-    base_folder = system_dir / f"{method}_{basis}"
+    if mode == "sp":
+        if opt_output_path is None:
+            raise ValueError("opt_output_path must be provided for sp mode")
+            
+        output_text = read_text(opt_output_path) if opt_output_path.exists() else ""
+        
+        if molecule_processing_fn == build_sp_standard_molecule_section:
+            return molecule_processing_fn(output_text, template, species)
+        elif molecule_processing_fn == build_sp_fragmented_molecule_section:
+            return molecule_processing_fn(output_text, template, species, catalyst)
+    else:
+        if molecule_processing_fn in (build_fragmented_molecule_section,) and catalyst:
+            return molecule_processing_fn(template, species, catalyst)
+        return molecule_processing_fn(template, species) if molecule_processing_fn else template
+
+
+def get_rem_section(system_dir: Path, calc: str, rem: dict, category: str, branch: str,
+                    mode: str, method: str, basis: str) -> str:
+    """
+    Returns the REM section. For sp mode, uses sp builder; for opt mode, uses the opt builder.
+    """
+    if mode == "sp":
+        eda2 = "0" if category == "no_cat" or branch == "cat" else rem.get("eda2", "0")
+        return rem_builder.build_rem_section_for_sp(
+            system_dir, method, basis,
+            rem.get("dispersion", "false"), rem.get("solvent", "false"), eda2
+        )
+    else:
+        jobtype = "ts" if branch == "ts" else ("sp" if len(rem.get("molecule_section", "").splitlines()) - 1 == 1 else "opt")
+        return rem_builder.build_rem_section_for_opt(
+            system_dir, calc, rem["method"], basis,
+            rem.get("dispersion", "false"), rem.get("solvent", "false"), jobtype
+        )
+
+
+def build_file_path(system_dir: Path, method: str, basis: str, dispersion: str, solvent: str,
+                    category: str, branch: str, species: str, calc_type: str,
+                    catalyst_name: str = "", mode: str = "opt", opt_params: dict = None) -> Path:
+    """
+    Constructs the full input file path using sanitized values.
+    For opt mode, folder and file names are built using the provided values.
+    For sp mode, the top folder comes from the opt values in opt_params and an extra subfolder is added.
+    """
+    if mode == "opt":
+        top_method, top_basis, top_disp, top_solvent = method, basis, dispersion, solvent
+        suffix = "_opt.in"
+    elif mode == "sp":
+        if opt_params is None:
+            raise ValueError("For sp mode, opt_params must be provided.")
+        top_method = opt_params.get("method")
+        top_basis = opt_params.get("basis")
+        top_disp = opt_params.get("dispersion")
+        top_solvent = opt_params.get("solvent")
+        suffix = "_sp.in"
+
+        # Create sp_folder name without "false" values
+        sp_folder_parts = [method]
+        
+        # Only include dispersion if not false
+        if dispersion and dispersion.lower() != "false":
+            sp_folder_parts.append(dispersion)
+            
+        # Always include basis set
+        sp_folder_parts.append(basis)
+        
+        # Only include solvent if not false
+        if solvent and solvent.lower() != "false":
+            sp_folder_parts.append(solvent)
+        
+        # Add sp suffix
+        sp_folder_parts.append("sp")
+        
+        # Join parts with underscores
+        sp_folder = "_".join(sp_folder_parts)
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+  
+    # Create folder name without "false" values
+    folder_parts = [top_method]
+    
+    # Only include dispersion if not false
+    if top_disp and top_disp.lower() != "false":
+        folder_parts.append(top_disp)
+        
+    # Always include basis set
+    folder_parts.append(top_basis)
+    
+    # Only include solvent if not false
+    if top_solvent and top_solvent.lower() != "false":
+        folder_parts.append(top_solvent)
+    
+    # Join parts with underscores
+    base_folder = system_dir / "_".join(folder_parts)
+  
     if category == "no_cat":
         if branch in ("reactants", "products"):
-            relative = Path("no_cat") / branch / species / f"{species}_opt.in"
+            if mode == "opt":
+                relative = Path("no_cat") / branch / species / f"{species}{suffix}"
+            else:
+                relative = Path("no_cat") / branch / species / sp_folder / f"{species}{suffix}"
         elif branch == "ts":
-            relative = Path("no_cat") / "ts" / "tscomplex_opt.in"
+            if mode == "opt":
+                relative = Path("no_cat") / "ts" / f"tscomplex{suffix}"
+            else:
+                relative = Path("no_cat") / "ts" / sp_folder / f"tscomplex{suffix}"
         else:
             raise ValueError(f"Unknown branch for no_cat: {branch}")
-        full_path = base_folder / relative
     elif category == "cat":
         if not catalyst_name:
             raise ValueError("For catalyst cases, catalyst_name must be provided.")
         if branch == "preTS":
-            relative = Path(catalyst_name) / "preTS" / species / calc_type / f"preTS_{species}_{calc_type}_opt.in"
+            if mode == "opt":
+                relative = Path(catalyst_name) / "preTS" / species / calc_type / f"preTS_{species}_{calc_type}{suffix}"
+            else:
+                relative = Path(catalyst_name) / "preTS" / species / calc_type / sp_folder / f"preTS_{species}_{calc_type}{suffix}"
         elif branch == "postTS":
-            relative = Path(catalyst_name) / "postTS" / species / calc_type / f"postTS_{species}_{calc_type}_opt.in"
+            if mode == "opt":
+                relative = Path(catalyst_name) / "postTS" / species / calc_type / f"postTS_{species}_{calc_type}{suffix}"
+            else:
+                relative = Path(catalyst_name) / "postTS" / species / calc_type / sp_folder / f"postTS_{species}_{calc_type}{suffix}"
         elif branch == "ts":
-            relative = Path(catalyst_name) / "ts" / calc_type / f"ts_{catalyst_name}-tscomplex_{calc_type}_opt.in"
+            if mode == "opt":
+                relative = Path(catalyst_name) / "ts" / calc_type / f"ts_{catalyst_name}-tscomplex_{calc_type}{suffix}"
+            else:
+                relative = Path(catalyst_name) / "ts" / calc_type / sp_folder / f"ts_{catalyst_name}-tscomplex_{calc_type}{suffix}"
         elif branch == "cat":
-            relative = Path(catalyst_name) / "cat" / f"{catalyst_name}_opt.in"
+            if mode == "opt":
+                relative = Path(catalyst_name) / "cat" / f"{catalyst_name}{suffix}"
+            else:
+                relative = Path(catalyst_name) / "cat" / sp_folder / f"{catalyst_name}{suffix}"
         else:
             raise ValueError(f"Unknown branch for catalyst: {branch}")
-        full_path = base_folder / relative
     else:
         raise ValueError(f"Unknown category: {category}")
-    full_path.parent.mkdir(parents=True, exist_ok=True)
+  
+    full_path = base_folder / relative
     return full_path
 
-def build_input_file_content(template_base: str, rem_section: str, molecule_section: str) -> str:
-    """
-    Assembles the complete Q-Chem input file content by inserting
-    the molecule section and the fully formatted REM section into the base template.
-    """
-    return template_base.format(molecule_section=molecule_section.strip(),
-                                rem_section=rem_section.rstrip())
-
-def build_and_write_input_file(system_dir: Path, method: str, basis: str,
-                               category: str, branch: str,
-                               species: str, calc_type: str,
+def build_and_write_input_file(system_dir: Path,
+                               sanitized: dict,
+                               original: dict,
+                               category: str,
+                               branch: str,
+                               species: str,
+                               calc_type: str,
                                template_base_path: Path,
                                molecule_template_path: Path,
-                               rem_substitutions: dict,
-                               molecule_processing_fn,
-                               catalyst_name: str = "") -> None:
+                               molecule_proc_fn,
+                               catalyst_name: str = "",
+                               mode: str = "opt",
+                               overwrite: str = None,
+                               sp_strategy: str = "smart") -> None:
     """
-    Constructs the file path, assembles the input file content using a molecule processing function,
-    and writes the file to disk.
+    Builds the file path (using sanitized values), creates the file content, and writes it to disk.
+    In sp mode the opt_params for file naming are taken from the sanitized version.
+    
+        Args:
+        system_dir: Base system directory
+        sanitized: Dictionary with sanitized naming values
+        original: Dictionary with original values
+        category: Category (no_cat or cat)
+        branch: Branch (reactants, products, ts, etc.)
+        species: Species name
+        calc_type: Calculation type
+        template_base_path: Path to base template file
+        molecule_template_path: Path to molecule template file
+        molecule_proc_fn: Function to process molecule section
+        catalyst_name: Catalyst name (optional)
+        mode: Mode (opt or sp)
+        overwrite: Overwrite criteria (None, "all", "CRASH", "terminated", etc.)
+        sp_strategy: Strategy for SP file generation ("always", "smart", "never")
     """
-    file_path = build_file_path(system_dir, method, basis, category, branch, species, calc_type, catalyst_name)
+    # SP file generation handling stays the same
+    if mode == "sp":
+        # Skip SP file generation based on strategy
+        if sp_strategy == "never":
+            return
+            
+        opt_params = {
+            "method": sanitized["opt_method"],
+            "basis": sanitized["opt_basis"],
+            "dispersion": sanitized["opt_dispersion"],
+            "solvent": sanitized["opt_solvent"]
+        }
+        
+        opt_input_path = build_file_path(
+            system_dir,
+            opt_params["method"],
+            opt_params["basis"],
+            opt_params["dispersion"],
+            opt_params["solvent"],
+            category, branch, species, calc_type, catalyst_name, mode="opt"
+        )
+        
+        if sp_strategy == "smart":
+            # Use the status checker to check if the optimization was successful
+            from PyA3EDA.core.status.status_checker import get_status_for_file
+            
+            status, details = get_status_for_file(opt_input_path)
+            
+            if status != "SUCCESSFUL":
+                logging.info(f"Skipping SP file generation for {species} - OPT status is {status}: {details}")
+                return
+                
+        opt_output_path = opt_input_path.with_suffix(".out")
+    else:
+        opt_params = None
+        opt_output_path = None
+
+    file_path = build_file_path(
+        system_dir,
+        sanitized["method"],
+        sanitized["basis"],
+        sanitized["dispersion"],
+        sanitized["solvent"],
+        category, branch, species, calc_type, catalyst_name, mode, opt_params
+    )
+    
+    # Check if file exists and determine if we should overwrite
+    if file_path.exists():
+        from PyA3EDA.core.status.status_checker import should_process_file
+        should_write, reason = should_process_file(file_path, overwrite)
+        if should_write:
+            logging.info(f"Overwriting file ({reason}): {file_path.relative_to(system_dir)}")
+        else:
+            logging.info(f"Skipping file ({reason}): {file_path.relative_to(system_dir)}")
+            return
+    
     base_template = read_text(template_base_path)
+    
+    if mode == "opt":
+        geom_file = system_dir / "templates" / "rem" / "geom_opt.rem"
+        base_template += "\n\n" + read_text(geom_file)
+    
+    # Add solvent REM section if solvent is specified and not "false"
+    if sanitized["solvent"] and sanitized["solvent"].lower() != "false":
+        solvent_name = sanitized["solvent"]
+        solvent_file = system_dir / "templates" / "rem" / f"solvent_{solvent_name}.rem"
+        if solvent_file.exists():
+            base_template += "\n\n" + read_text(solvent_file)
+        else:
+            logging.warning(f"Solvent file {solvent_file} not found for solvent {solvent_name}")
+
     molecule_template_raw = read_text(molecule_template_path)
     
-    # For fragmented processing, pass catalyst_name to select the proper fragment data.
-    if molecule_processing_fn == build_fragmented_molecule_section and catalyst_name:
-        molecule_section = molecule_processing_fn(molecule_template_raw, species, catalyst_name)
-    else:
-        molecule_section = molecule_processing_fn(molecule_template_raw, species) if molecule_processing_fn else molecule_template_raw
-
-    lines = molecule_section.splitlines()
-    atom_count = len(lines) - 1 if lines else 0
-    jobtype = "ts" if branch == "ts" else ("sp" if atom_count == 1 else "opt")
-    rem_section = rem_builder.build_rem_section_for_calc_type(
-        system_dir, 
-        calc_type, 
-        rem_substitutions["method"], 
-        basis, 
-        rem_substitutions.get("dispersion", "false"),
-        jobtype
+    molecule_section = get_molecule_section(
+        template=molecule_template_raw,
+        molecule_processing_fn=molecule_proc_fn,
+        species=species,
+        catalyst=catalyst_name,
+        mode=mode,
+        opt_output_path=opt_output_path
     )
-    content = build_input_file_content(base_template, rem_section, molecule_section)
-    if write_text(file_path, content):
-        logging.info(f"Input file written to {file_path}")
+    
+    original["molecule_section"] = molecule_section
+    
+    if mode == "opt":
+        rem_vals = {
+            "method": original["method"],
+            "basis": original["basis"],
+            "dispersion": original.get("dispersion", "false"),
+            "solvent": original.get("solvent", "false"),
+            "molecule_section": molecule_section
+        }
     else:
-        logging.error(f"Failed to write input file to {file_path}")
+        rem_vals = {
+            "method": original["method"],
+            "basis": original["basis"],
+            "dispersion": original.get("dispersion", "false"),
+            "solvent": original.get("solvent", "false"),
+            "molecule_section": molecule_section,
+            "eda2": original.get("eda2")
+        }
+  
+    rem_section = get_rem_section(
+        system_dir, calc_type, rem_vals, category, branch, mode,
+        rem_vals["method"], rem_vals["basis"]
+    )
+    content = base_template.format(
+        molecule_section=molecule_section.strip(),
+        rem_section=rem_section.rstrip()
+    )
+  
+    if not content.strip():
+        logging.error(f"Empty content generated for {file_path.relative_to(system_dir)}. Skipping file creation.")
+        return
+  
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    if write_text(file_path, content):
+        logging.info(f"Input file written to {file_path.relative_to(system_dir)}")
+    else:
+        logging.error(f"Failed to write input file to {file_path.relative_to(system_dir)}")
 
-def get_combinations(species_list: list, min_length: int = 1) -> list:
+def get_combinations(species_list, min_length=2):
     """
-    Returns all combinations from the species_list with combination length >= min_length,
-    preserving configuration order, as hyphen-joined strings.
+    Generates dash-joined combination strings from a list of species.
+    Uses each species' opt value so that file naming is consistent.
     """
-    combos = []
-    n = len(species_list)
-    for r in range(min_length, n + 1):
-        for comb in combinations(species_list, r):
-            names = [item["sanitized"] for item in comb]
-            combos.append("-".join(names))
-    return combos
+    for r in range(min_length, len(species_list) + 1):
+        for combo in combinations(species_list, r):
+            yield "-".join(spec["name"]["opt"] for spec in combo)
 
-def generate_all_inputs(config: dict, system_dir: Path) -> None:
+
+def process_input_files(config_manager, system_dir: Path, mode: str = "generate",
+                       overwrite: str = None, sp_strategy: str = "smart"):
     """
-    Generate all Q-Chem input files based on the sanitized configuration.
+    Process input files based on mode - either generate them or yield their paths.
+    
+    Args:
+        config_manager: ConfigManager instance with processed configuration
+        system_dir: Base system directory
+        mode: "generate" to create files, "yield" to yield paths
+        overwrite: Overwrite criteria (None, "all", "CRASH", "terminated", etc.)
+        sp_strategy: Strategy for SP file generation ("always", "smart", "never")
     """
+    if mode not in ("generate", "yield"):
+        raise ValueError(f"Invalid mode: {mode}. Must be 'generate' or 'yield'")
+    
     templates_dir = system_dir / "templates"
     base_template_path = templates_dir / "base_template.in"
-    
-    # -------- no_cat branch --------
-    for method in config["methods"]:
-        for basis in method["basis_sets"]:
-            # ----- Reactants -----
-            for reactant in config.get("reactants", []):
-                species = reactant["sanitized"]
-                build_and_write_input_file(
-                    system_dir=system_dir,
-                    method=method["sanitized"],
-                    basis=basis,
-                    category="no_cat",
-                    branch="reactants",
-                    species=species,
-                    calc_type="",
-                    template_base_path=base_template_path,
-                    molecule_template_path=templates_dir / "molecule" / f"{species}.xyz",
-                    rem_substitutions={
-                        "method": method["original"],
-                        "basis": basis,
-                        "dispersion": method.get("dispersion", "false")
-                    },
-                    molecule_processing_fn=build_standard_molecule_section
-                )
-            reactants_included = [r for r in config.get("reactants", []) if r.get("include", False)]
-            if len(reactants_included) > 1:
-                for combo in get_combinations(reactants_included, min_length=2):
-                    build_and_write_input_file(
-                        system_dir=system_dir,
-                        method=method["sanitized"],
-                        basis=basis,
-                        category="no_cat",
-                        branch="reactants",
-                        species=combo,
-                        calc_type="",
-                        template_base_path=base_template_path,
-                        molecule_template_path=templates_dir / "molecule" / f"{combo}.xyz",
-                        rem_substitutions={
-                            "method": method["original"],
-                            "basis": basis,
-                            "dispersion": method.get("dispersion", "false")
-                        },
-                        molecule_processing_fn=build_standard_molecule_section
-                    )
-            # ----- Products -----
-            for product in config.get("products", []):
-                species = product["sanitized"]
-                build_and_write_input_file(
-                    system_dir=system_dir,
-                    method=method["sanitized"],
-                    basis=basis,
-                    category="no_cat",
-                    branch="products",
-                    species=species,
-                    calc_type="",
-                    template_base_path=base_template_path,
-                    molecule_template_path=templates_dir / "molecule" / f"{species}.xyz",
-                    rem_substitutions={
-                        "method": method["original"],
-                        "basis": basis,
-                        "dispersion": method.get("dispersion", "false")
-                    },
-                    molecule_processing_fn=build_standard_molecule_section
-                )
-            products_included = [p for p in config.get("products", []) if p.get("include", False)]
-            if len(products_included) > 1:
-                for combo in get_combinations(products_included, min_length=2):
-                    build_and_write_input_file(
-                        system_dir=system_dir,
-                        method=method["sanitized"],
-                        basis=basis,
-                        category="no_cat",
-                        branch="products",
-                        species=combo,
-                        calc_type="",
-                        template_base_path=base_template_path,
-                        molecule_template_path=templates_dir / "molecule" / f"{combo}.xyz",
-                        rem_substitutions={
-                            "method": method["original"],
-                            "basis": basis,
-                            "dispersion": method.get("dispersion", "false")
-                        },
-                        molecule_processing_fn=build_standard_molecule_section
-                    )
-            build_and_write_input_file(
-                system_dir=system_dir,
-                method=method["sanitized"],
-                basis=basis,
-                category="no_cat",
-                branch="ts",
-                species="tscomplex",
-                calc_type="",
-                template_base_path=base_template_path,
-                molecule_template_path=templates_dir / "molecule" / "tscomplex.xyz",
-                rem_substitutions={
-                    "method": method["original"],
-                    "basis": basis,
-                    "dispersion": method.get("dispersion", "false")
-                },
-                molecule_processing_fn=build_standard_molecule_section
-            )
-            
-            # -------- Catalyst branch --------
-            for catalyst in config.get("catalysts", []):
-                # Catalyst-only input file in branch "cat".
-                build_and_write_input_file(
-                    system_dir=system_dir,
-                    method=method["sanitized"],
-                    basis=basis,
-                    category="cat",
-                    branch="cat",
-                    species=catalyst["sanitized"],
-                    calc_type="",
-                    template_base_path=base_template_path,
-                    molecule_template_path=templates_dir / "molecule" / f"{catalyst['sanitized']}.xyz",
-                    rem_substitutions={
-                        "method": method["original"],
-                        "basis": basis,
-                        "dispersion": method.get("dispersion", "false")
-                    },
-                    molecule_processing_fn=build_standard_molecule_section,
-                    catalyst_name=catalyst["sanitized"]
-                )
-                
-                # preTS: use included reactants.
-                reactants_included = [r for r in config.get("reactants", []) if r.get("include", False)]
-                for combo in get_combinations(reactants_included):
-                    species = f"{catalyst['sanitized']}-{combo}"
-                    for calc_type in ("full_cat", "pol_cat", "frz_cat"):
-                        build_and_write_input_file(
-                            system_dir=system_dir,
-                            method=method["sanitized"],
-                            basis=basis,
-                            category="cat",
-                            branch="preTS",
-                            species=species,
-                            calc_type=calc_type,
-                            template_base_path=base_template_path,
-                            molecule_template_path=templates_dir / "molecule" / f"preTS_{species}.xyz",
-                            rem_substitutions={
-                                "method": method["original"],
-                                "basis": basis,
-                                "dispersion": method.get("dispersion", "false")
-                            },
-                            molecule_processing_fn=build_fragmented_molecule_section,
-                            catalyst_name=catalyst["sanitized"]
-                        )
-                # postTS: use included products.
-                products_included = [p for p in config.get("products", []) if p.get("include", False)]
-                for combo in get_combinations(products_included):
-                    species = f"{catalyst['sanitized']}-{combo}"
-                    for calc_type in ("full_cat", "pol_cat", "frz_cat"):
-                        build_and_write_input_file(
-                            system_dir=system_dir,
-                            method=method["sanitized"],
-                            basis=basis,
-                            category="cat",
-                            branch="postTS",
-                            species=species,
-                            calc_type=calc_type,
-                            template_base_path=base_template_path,
-                            molecule_template_path=templates_dir / "molecule" / f"postTS_{species}.xyz",
-                            rem_substitutions={
-                                "method": method["original"],
-                                "basis": basis,
-                                "dispersion": method.get("dispersion", "false")
-                            },
-                            molecule_processing_fn=build_fragmented_molecule_section,
-                            catalyst_name=catalyst["sanitized"]
-                        )
-                # Catalyst TS: one file per calc_type.
-                for calc_type in ("full_cat", "pol_cat", "frz_cat"):
-                    build_and_write_input_file(
-                        system_dir=system_dir,
-                        method=method["sanitized"],
-                        basis=basis,
-                        category="cat",
-                        branch="ts",
-                        species=f"ts_{catalyst['sanitized']}-tscomplex",
-                        calc_type=calc_type,
-                        template_base_path=base_template_path,
-                        molecule_template_path=templates_dir / "molecule" / f"ts_{catalyst['sanitized']}-tscomplex.xyz",
-                        rem_substitutions={
-                            "method": method["original"],
-                            "basis": basis,
-                            "dispersion": method.get("dispersion", "false")
-                        },
-                        molecule_processing_fn=build_fragmented_molecule_section,
-                        catalyst_name=catalyst["sanitized"]
-                    )
-    logging.info("Input file generation completed.")
+    processed_config = config_manager.get_builder_config() if hasattr(config_manager, 'get_builder_config') else config_manager
 
-def iter_input_paths(config: dict, system_dir: Path):
-    """
-    Generator that yields expected Q-Chem input file paths based on the sanitized configuration.
-    This uses the same logic as generate_all_inputs but yields each path on the fly.
-    """
-    # -------- no_cat branch --------
-    for method in config["methods"]:
-        for basis in method["basis_sets"]:
-            # Reactants
-            for reactant in config.get("reactants", []):
-                species = reactant["sanitized"]
-                yield build_file_path(system_dir, method["sanitized"], basis, "no_cat", "reactants", species, "", "")
-            reactants_included = [r for r in config.get("reactants", []) if r.get("include", False)]
-            if len(reactants_included) > 1:
-                for combo in get_combinations(reactants_included, min_length=2):
-                    yield build_file_path(system_dir, method["sanitized"], basis, "no_cat", "reactants", combo, "", "")
-            # Products
-            for product in config.get("products", []):
-                species = product["sanitized"]
-                yield build_file_path(system_dir, method["sanitized"], basis, "no_cat", "products", species, "", "")
-            products_included = [p for p in config.get("products", []) if p.get("include", False)]
-            if len(products_included) > 1:
-                for combo in get_combinations(products_included, min_length=2):
-                    yield build_file_path(system_dir, method["sanitized"], basis, "no_cat", "products", combo, "", "")
-            # Transition state in no_cat branch
-            yield build_file_path(system_dir, method["sanitized"], basis, "no_cat", "ts", "tscomplex", "", "")
-            
-            # -------- Catalyst branch --------
-            for catalyst in config.get("catalysts", []):
-                # Catalyst-only file in branch "cat"
-                yield build_file_path(system_dir, method["sanitized"], basis, "cat", "cat", catalyst["sanitized"], "", catalyst["sanitized"])
+    # Helper function to handle both path generation and file writing
+    def process_file(method, bs, file_mode, category, branch, species, calc_type="", 
+                    catalyst_name="", template_prefix="", molecule_fn_opt=None, molecule_fn_sp=None):
+        """
+        Process a single input file - either yield its path or build and write it.
+        """
+        if file_mode == "sp" and not (method["name"].get("sp_enabled", False) and bs.get("sp_enabled", False)):
+            return
+
+        # Always build the file path
+        if file_mode == "opt":
+            file_path = build_file_path(
+                system_dir,
+                method["name"]["opt"],
+                bs["opt"], 
+                method["dispersion"]["opt"],
+                method["solvent"]["opt"],
+                category, branch, species, calc_type, catalyst_name,
+                mode=file_mode
+            )
+        else:  # sp
+            file_path = build_file_path(
+                system_dir,
+                method["name"]["sp"],
+                bs["sp"],
+                method["dispersion"]["sp"],
+                method["solvent"]["sp"],
+                category, branch, species, calc_type, catalyst_name,
+                mode=file_mode,
+                opt_params={
+                    "method": method["name"]["opt"],
+                    "basis": bs["opt"],
+                    "dispersion": method["dispersion"]["opt"],
+                    "solvent": method["solvent"]["opt"]
+                }
+            )
+        
+        # For yield mode, just yield the path
+        if mode == "yield":
+            return file_path
+        
+        # For generate mode, build and write the file
+        sanitized, original = config_manager.get_common_values(method, bs, file_mode)
+        
+        # Choose the appropriate molecule function
+        molecule_proc_fn = molecule_fn_opt if file_mode == "opt" else molecule_fn_sp
+        
+        # Get molecule template path
+        template_name = f"{template_prefix}{species}"
+        # if calc_type:
+        #     template_name += f"_{calc_type}"
+        
+        molecule_template_path = templates_dir / "molecule" / f"{template_name}.xyz"
+        
+        build_and_write_input_file(
+            system_dir=system_dir,
+            sanitized=sanitized,
+            original=original,
+            category=category,
+            branch=branch,
+            species=species,
+            calc_type=calc_type,
+            template_base_path=base_template_path,
+            molecule_template_path=molecule_template_path,
+            molecule_proc_fn=molecule_proc_fn,
+            catalyst_name=catalyst_name,
+            mode=file_mode,
+            overwrite=overwrite,
+            sp_strategy=sp_strategy
+        )
+        
+        # Return None for consistency (calling code will filter these)
+        return None
+
+    # --- no_cat (non-catalyst) branch ---
+    for method in processed_config.get("methods", []):
+        for bs in method.get("basis_sets", []):
+            # --- Process reactants ---
+            for reactant in processed_config.get("reactants", []):
+                species = reactant["name"]["opt"]
                 
-                # preTS: using included reactants.
-                reactants_included = [r for r in config.get("reactants", []) if r.get("include", False)]
-                for combo in get_combinations(reactants_included):
-                    species = f"{catalyst['sanitized']}-{combo}"
+                for file_mode in ("opt", "sp"):
+                    result = process_file(
+                        method, bs, file_mode, "no_cat", "reactants", species,
+                        molecule_fn_opt=build_standard_molecule_section,
+                        molecule_fn_sp=build_sp_standard_molecule_section
+                    )
+                    if mode == "yield" and result:
+                        yield result
+            
+            # --- Process reactant combinations ---
+            reactants_incl = [r for r in processed_config.get("reactants", []) if r.get("include", True)]
+            if len(reactants_incl) > 1:
+                for combo in get_combinations(reactants_incl, min_length=2):
+                    for file_mode in ("opt", "sp"):
+                        result = process_file(
+                            method, bs, file_mode, "no_cat", "reactants", combo,
+                            molecule_fn_opt=build_standard_molecule_section,
+                            molecule_fn_sp=build_sp_standard_molecule_section
+                        )
+                        if mode == "yield" and result:
+                            yield result
+            
+            # --- Process products ---
+            for product in processed_config.get("products", []):
+                species = product["name"]["opt"]
+                
+                for file_mode in ("opt", "sp"):
+                    result = process_file(
+                        method, bs, file_mode, "no_cat", "products", species,
+                        molecule_fn_opt=build_standard_molecule_section,
+                        molecule_fn_sp=build_sp_standard_molecule_section
+                    )
+                    if mode == "yield" and result:
+                        yield result
+            
+            # --- Process transition state (TS) ---
+            for file_mode in ("opt", "sp"):
+                result = process_file(
+                    method, bs, file_mode, "no_cat", "ts", "tscomplex",
+                    molecule_fn_opt=build_standard_molecule_section,
+                    molecule_fn_sp=build_sp_standard_molecule_section
+                )
+                if mode == "yield" and result:
+                    yield result
+            
+            # --- Process catalysts ---
+            for catalyst in processed_config.get("catalysts", []):
+                cat_name = catalyst["name"]["opt"]
+                
+                # --- Catalyst itself ---
+                for file_mode in ("opt", "sp"):
+                    result = process_file(
+                        method, bs, file_mode, "cat", "cat", cat_name,
+                        catalyst_name=cat_name,
+                        molecule_fn_opt=build_standard_molecule_section,
+                        molecule_fn_sp=build_sp_standard_molecule_section
+                    )
+                    if mode == "yield" and result:
+                        yield result
+                
+                # --- preTS: catalyst with reactants ---
+                reactants_incl = [r for r in processed_config.get("reactants", []) if r.get("include", True)]
+                for combo in get_combinations(reactants_incl, min_length=1):
+                    species_combo = f"{cat_name}-{combo}"
+                    
                     for calc_type in ("full_cat", "pol_cat", "frz_cat"):
-                        yield build_file_path(system_dir, method["sanitized"], basis, "cat", "preTS", species, calc_type, catalyst["sanitized"])
-                        
-                # postTS: using included products.
-                products_included = [p for p in config.get("products", []) if p.get("include", False)]
-                for combo in get_combinations(products_included):
-                    species = f"{catalyst['sanitized']}-{combo}"
+                        for file_mode in ("opt", "sp"):
+                            result = process_file(
+                                method, bs, file_mode, "cat", "preTS", species_combo,
+                                calc_type=calc_type, catalyst_name=cat_name,
+                                template_prefix="preTS_",
+                                molecule_fn_opt=build_fragmented_molecule_section,
+                                molecule_fn_sp=build_sp_fragmented_molecule_section
+                            )
+                            if mode == "yield" and result:
+                                yield result
+                
+                # --- postTS: catalyst with products ---
+                products_incl = [p for p in processed_config.get("products", []) if p.get("include", True)]
+                for combo in get_combinations(products_incl, min_length=1):
+                    species_combo = f"{cat_name}-{combo}"
+                    
                     for calc_type in ("full_cat", "pol_cat", "frz_cat"):
-                        yield build_file_path(system_dir, method["sanitized"], basis, "cat", "postTS", species, calc_type, catalyst["sanitized"])
-                        
-                # Catalyst TS: one file per calc_type.
+                        for file_mode in ("opt", "sp"):
+                            result = process_file(
+                                method, bs, file_mode, "cat", "postTS", species_combo,
+                                calc_type=calc_type, catalyst_name=cat_name,
+                                template_prefix="postTS_",
+                                molecule_fn_opt=build_fragmented_molecule_section,
+                                molecule_fn_sp=build_sp_fragmented_molecule_section
+                            )
+                            if mode == "yield" and result:
+                                yield result
+                
+                # --- TS: Catalyst TS ---
                 for calc_type in ("full_cat", "pol_cat", "frz_cat"):
-                    yield build_file_path(system_dir, method["sanitized"], basis, "cat", "ts", f"ts_{catalyst['sanitized']}-tscomplex", calc_type, catalyst["sanitized"])
+                    for file_mode in ("opt", "sp"):
+                        result = process_file(
+                            method, bs, file_mode, "cat", "ts", f"ts_{cat_name}-tscomplex",
+                            calc_type=calc_type, catalyst_name=cat_name,
+                            molecule_fn_opt=build_fragmented_molecule_section,
+                            molecule_fn_sp=build_sp_fragmented_molecule_section
+                        )
+                        if mode == "yield" and result:
+                            yield result
+
+    if mode == "generate":
+        logging.info("Input file generation completed.")
+
+
+def generate_all_inputs(config_manager, system_dir: Path, overwrite: str = None, sp_strategy: str = "smart") -> None:
+    """Generate all Q-Chem input files using the unified config from config_manager."""
+    list(process_input_files(config_manager, system_dir, "generate", overwrite, sp_strategy))
+
+
+def iter_input_paths(config_manager, system_dir: Path):
+    """Iterates through the unified config from config_manager and yields input file paths."""
+    yield from process_input_files(config_manager, system_dir, "yield")

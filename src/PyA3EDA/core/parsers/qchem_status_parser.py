@@ -7,7 +7,7 @@ Parses the contents of Q-Chem status and error files to determine the calculatio
 import re
 from typing import Tuple
 
-def parse_qchem_status(content: str, err_content: str) -> Tuple[str, str]:
+def parse_qchem_status(content: str, err_content: str, submission_exists: bool = False) -> Tuple[str, str]:
     """
     Parses Q-Chem status and error text and returns a tuple (status, details).
     
@@ -43,16 +43,37 @@ def parse_qchem_status(content: str, err_content: str) -> Tuple[str, str]:
                 error_msg = 'Unknown failure'
         return status, error_msg
 
+    # Check if job is still running based on submission file existence
+    if submission_exists:
+        return 'running', 'Job submission file exists'
+
     if not content:
         return 'nofile', 'Output file not found'
     
+    # Check for running job in .out file
     if 'Running on' in content and 'Thank you very much' not in content:
         return 'running', 'Calculation in progress'
-    
+
     if 'Thank you very much' in content:
         time_pattern = r'Total job time:\s*(.*)'
         time_match = re.search(time_pattern, content)
-        job_time = time_match.group(1).strip() if time_match else 'unknown'
+        
+        if time_match:
+            time_str = time_match.group(1).strip()
+            # Extract wall time in seconds
+            wall_time_match = re.search(r'(\d+(?:\.\d+)?)s\(wall\)', time_str)
+            
+            if wall_time_match:
+                wall_seconds = float(wall_time_match.group(1))
+                # Convert to hours, minutes, seconds
+                hours, remainder = divmod(wall_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                job_time = f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
+            else:
+                job_time = time_str
+        else:
+            job_time = 'unknown'
+            
         return 'SUCCESSFUL', f'Completed in {job_time}'
     
     if 'Q-Chem fatal error occurred' in content:
