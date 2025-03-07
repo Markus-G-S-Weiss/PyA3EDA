@@ -98,20 +98,15 @@ import logging
 from itertools import combinations
 from PyA3EDA.core.utils.file_utils import read_text, write_text
 from PyA3EDA.core.builders.molecule_builder import (
-    build_standard_molecule_section, 
-    build_fragmented_molecule_section,
-    build_sp_standard_molecule_section,
-    build_sp_fragmented_molecule_section
-)
+    build_standard_molecule_section, build_fragmented_molecule_section)
 from PyA3EDA.core.builders import rem_builder
 
 
-def get_molecule_section(template: str, molecule_processing_fn, species: str, catalyst: str=None,
-                         mode: str="opt", opt_output_path: Path=None) -> str:
+def get_molecule_section(template: str, molecule_processing_fn, species: str, 
+                         catalyst: str = None, mode: str = "opt", 
+                         opt_output_path: Path = None, system_dir: Path = None) -> str:
     """
     Returns the molecule section of the input file.
-    
-    For mode "sp", uses the provided opt_output_path to read the corresponding opt output file.
     
     Args:
         template: Template string for the molecule section
@@ -119,25 +114,57 @@ def get_molecule_section(template: str, molecule_processing_fn, species: str, ca
         species: Species name
         catalyst: Catalyst name (optional)
         mode: Mode ("opt" or "sp")
-        opt_output_path: Path to the optimization output file (required for sp mode)
+        opt_output_path: Path to the optimization output file (for sp mode)
+        system_dir: System directory to locate catalyst/substrate templates
         
     Returns:
         Processed molecule section string
     """
-    if mode == "sp":
-        if opt_output_path is None:
-            raise ValueError("opt_output_path must be provided for sp mode")
+    # For SP mode, read the optimization output
+    output_text = None
+    if mode == "sp" and opt_output_path and opt_output_path.exists():
+        output_text = read_text(opt_output_path)
+    
+    # For fragmented molecule sections, load catalyst and substrate templates
+    catalyst_xyz_text = None
+    substrate_xyz_text = None
+    substrate_id = None
+    
+    if molecule_processing_fn == build_fragmented_molecule_section and system_dir:
+        # Parse the species to get catalyst and substrate IDs
+        parts = species.split("-")
+        if len(parts) >= 2:
+            cat_id = catalyst or parts[0]
+            substrate_id = "-".join(parts[1:])
             
-        output_text = read_text(opt_output_path) if opt_output_path.exists() else ""
-        
-        if molecule_processing_fn == build_sp_standard_molecule_section:
-            return molecule_processing_fn(output_text, template, species)
-        elif molecule_processing_fn == build_sp_fragmented_molecule_section:
-            return molecule_processing_fn(output_text, template, species, catalyst)
+            # Load catalyst and substrate templates
+            catalyst_template_path = system_dir / "templates" / "molecule" / f"{cat_id}.xyz"
+            substrate_template_path = system_dir / "templates" / "molecule" / f"{substrate_id}.xyz"
+            
+            if catalyst_template_path.exists():
+                catalyst_xyz_text = read_text(catalyst_template_path)
+                if not catalyst_xyz_text:
+                    logging.error(f"Failed to read catalyst template: {catalyst_template_path}")
+            else:
+                logging.error(f"Missing catalyst template: {catalyst_template_path}")
+                
+            if substrate_template_path.exists():
+                substrate_xyz_text = read_text(substrate_template_path)
+                if not substrate_xyz_text:
+                    logging.error(f"Failed to read substrate template: {substrate_template_path}")
+            else:
+                logging.error(f"Missing substrate template: {substrate_template_path}")
+    
+    # Use the appropriate molecule building function
+    if molecule_processing_fn == build_fragmented_molecule_section:
+        return molecule_processing_fn(
+            template, species, 
+            catalyst_xyz_text, substrate_xyz_text,
+            catalyst, substrate_id,
+            output_text
+        )
     else:
-        if molecule_processing_fn in (build_fragmented_molecule_section,) and catalyst:
-            return molecule_processing_fn(template, species, catalyst)
-        return molecule_processing_fn(template, species) if molecule_processing_fn else template
+        return molecule_processing_fn(template, species, output_text)
 
 
 def get_rem_section(system_dir: Path, calc: str, rem: dict, category: str, branch: str,
@@ -280,7 +307,7 @@ def build_and_write_input_file(system_dir: Path,
     Builds the file path (using sanitized values), creates the file content, and writes it to disk.
     In sp mode the opt_params for file naming are taken from the sanitized version.
     
-        Args:
+    Args:
         system_dir: Base system directory
         sanitized: Dictionary with sanitized naming values
         original: Dictionary with original values
@@ -296,7 +323,8 @@ def build_and_write_input_file(system_dir: Path,
         overwrite: Overwrite criteria (None, "all", "CRASH", "terminated", etc.)
         sp_strategy: Strategy for SP file generation ("always", "smart", "never")
     """
-    # SP file generation handling stays the same
+    # SP file generation handling
+    opt_output_path = None
     if mode == "sp":
         # Skip SP file generation based on strategy
         if sp_strategy == "never":
@@ -319,7 +347,7 @@ def build_and_write_input_file(system_dir: Path,
         )
         
         if sp_strategy == "smart":
-            # Use the status checker to check if the optimization was successful
+            # Check if optimization was successful
             from PyA3EDA.core.status.status_checker import get_status_for_file
             
             status, details = get_status_for_file(opt_input_path)
@@ -331,8 +359,8 @@ def build_and_write_input_file(system_dir: Path,
         opt_output_path = opt_input_path.with_suffix(".out")
     else:
         opt_params = None
-        opt_output_path = None
 
+    # Build file path
     file_path = build_file_path(
         system_dir,
         sanitized["method"],
@@ -346,76 +374,101 @@ def build_and_write_input_file(system_dir: Path,
     if file_path.exists():
         from PyA3EDA.core.status.status_checker import should_process_file
         should_write, reason = should_process_file(file_path, overwrite)
-        if should_write:
-            logging.info(f"Overwriting file ({reason}): {file_path.relative_to(system_dir)}")
-        else:
+        if not should_write:
             logging.info(f"Skipping file ({reason}): {file_path.relative_to(system_dir)}")
             return
+        logging.info(f"Overwriting file ({reason}): {file_path.relative_to(system_dir)}")
     
+    # Load base template
     base_template = read_text(template_base_path)
-    
+    if not base_template:
+        logging.error(f"Failed to read template: {template_base_path}")
+        return
+        
+    # Add geom opt section for opt mode
     if mode == "opt":
         geom_file = system_dir / "templates" / "rem" / "geom_opt.rem"
-        base_template += "\n\n" + read_text(geom_file)
+        geom_content = read_text(geom_file)
+        if geom_content:
+            base_template += "\n\n" + geom_content
+        else:
+            logging.warning(f"Geometry optimization template not found: {geom_file}")
     
-    # Add solvent REM section if solvent is specified and not "false"
+    # Add solvent REM section if solvent is specified
     if sanitized["solvent"] and sanitized["solvent"].lower() != "false":
         solvent_name = sanitized["solvent"]
         solvent_file = system_dir / "templates" / "rem" / f"solvent_{solvent_name}.rem"
         if solvent_file.exists():
-            base_template += "\n\n" + read_text(solvent_file)
+            solvent_content = read_text(solvent_file)
+            if solvent_content:
+                base_template += "\n\n" + solvent_content
         else:
-            logging.warning(f"Solvent file {solvent_file} not found for solvent {solvent_name}")
-
+            logging.warning(f"Solvent file not found: {solvent_file}")
+    
+    # Load molecule template
     molecule_template_raw = read_text(molecule_template_path)
+    if not molecule_template_raw:
+        logging.error(f"Failed to read molecule template: {molecule_template_path}")
+        return
     
-    molecule_section = get_molecule_section(
-        template=molecule_template_raw,
-        molecule_processing_fn=molecule_proc_fn,
-        species=species,
-        catalyst=catalyst_name,
-        mode=mode,
-        opt_output_path=opt_output_path
-    )
+    # Generate molecule section
+    try:
+        # Get molecule section through the unified interface
+        molecule_section = get_molecule_section(
+            template=molecule_template_raw,
+            molecule_processing_fn=molecule_proc_fn,
+            species=species,
+            catalyst=catalyst_name,
+            mode=mode,
+            opt_output_path=opt_output_path,
+            system_dir=system_dir  # Pass system_dir to locate catalyst/substrate templates
+        )
+        
+        if not molecule_section:
+            logging.error(f"Failed to generate molecule section for {species}")
+            return
+    except Exception as e:
+        logging.error(f"Error generating molecule section for {species}: {str(e)}")
+        return
     
+    # Store molecule section in original values
     original["molecule_section"] = molecule_section
     
-    if mode == "opt":
-        rem_vals = {
-            "method": original["method"],
-            "basis": original["basis"],
-            "dispersion": original.get("dispersion", "false"),
-            "solvent": original.get("solvent", "false"),
-            "molecule_section": molecule_section
-        }
-    else:
-        rem_vals = {
-            "method": original["method"],
-            "basis": original["basis"],
-            "dispersion": original.get("dispersion", "false"),
-            "solvent": original.get("solvent", "false"),
-            "molecule_section": molecule_section,
-            "eda2": original.get("eda2")
-        }
-  
+    # Prepare REM values
+    rem_vals = {
+        "method": original["method"],
+        "basis": original["basis"],
+        "dispersion": original.get("dispersion", "false"),
+        "solvent": original.get("solvent", "false"),
+        "molecule_section": molecule_section
+    }
+    
+    # Add EDA2 parameter for SP mode
+    if mode == "sp":
+        rem_vals["eda2"] = original.get("eda2", "0")
+    
+    # Get REM section
     rem_section = get_rem_section(
         system_dir, calc_type, rem_vals, category, branch, mode,
         rem_vals["method"], rem_vals["basis"]
     )
+    
+    # Format final content
     content = base_template.format(
-        molecule_section=molecule_section.strip(),
+        molecule_section=molecule_section.rstrip(),
         rem_section=rem_section.rstrip()
     )
-  
-    if not content.strip():
-        logging.error(f"Empty content generated for {file_path.relative_to(system_dir)}. Skipping file creation.")
+    
+    if not content.rstrip():
+        logging.error(f"Empty content generated for {file_path}. Skipping file creation.")
         return
-  
+    
+    # Write the file
     file_path.parent.mkdir(parents=True, exist_ok=True)
     if write_text(file_path, content):
         logging.info(f"Input file written to {file_path.relative_to(system_dir)}")
     else:
-        logging.error(f"Failed to write input file to {file_path.relative_to(system_dir)}")
+        logging.error(f"Failed to write input file to {file_path}")
 
 def get_combinations(species_list, min_length=2):
     """
@@ -446,9 +499,12 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
     base_template_path = templates_dir / "base_template.in"
     processed_config = config_manager.get_builder_config() if hasattr(config_manager, 'get_builder_config') else config_manager
 
+    # Keep track of OPT files already processed to avoid duplicates
+    processed_opt_files = set()
+
     # Helper function to handle both path generation and file writing
     def process_file(method, bs, file_mode, category, branch, species, calc_type="", 
-                    catalyst_name="", template_prefix="", molecule_fn_opt=None, molecule_fn_sp=None):
+                    catalyst_name="", template_prefix="", molecule_fn=None):
         """
         Process a single input file - either yield its path or build and write it.
         """
@@ -466,6 +522,22 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
                 category, branch, species, calc_type, catalyst_name,
                 mode=file_mode
             )
+            
+            # Create a unique key for this OPT file
+            opt_key = (
+                method["name"]["opt"], bs["opt"], 
+                method["dispersion"]["opt"], method["solvent"]["opt"],
+                category, branch, species, calc_type, catalyst_name
+            )
+            
+            # If we've already processed this exact OPT file, skip it
+            if opt_key in processed_opt_files:
+                if mode == "yield":
+                    return None
+            else:
+                # Otherwise mark it as processed
+                processed_opt_files.add(opt_key)
+                
         else:  # sp
             file_path = build_file_path(
                 system_dir,
@@ -490,14 +562,8 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
         # For generate mode, build and write the file
         sanitized, original = config_manager.get_common_values(method, bs, file_mode)
         
-        # Choose the appropriate molecule function
-        molecule_proc_fn = molecule_fn_opt if file_mode == "opt" else molecule_fn_sp
-        
         # Get molecule template path
         template_name = f"{template_prefix}{species}"
-        # if calc_type:
-        #     template_name += f"_{calc_type}"
-        
         molecule_template_path = templates_dir / "molecule" / f"{template_name}.xyz"
         
         build_and_write_input_file(
@@ -510,7 +576,7 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
             calc_type=calc_type,
             template_base_path=base_template_path,
             molecule_template_path=molecule_template_path,
-            molecule_proc_fn=molecule_proc_fn,
+            molecule_proc_fn=molecule_fn,
             catalyst_name=catalyst_name,
             mode=file_mode,
             overwrite=overwrite,
@@ -530,8 +596,7 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
                 for file_mode in ("opt", "sp"):
                     result = process_file(
                         method, bs, file_mode, "no_cat", "reactants", species,
-                        molecule_fn_opt=build_standard_molecule_section,
-                        molecule_fn_sp=build_sp_standard_molecule_section
+                        molecule_fn=build_standard_molecule_section
                     )
                     if mode == "yield" and result:
                         yield result
@@ -543,8 +608,7 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
                     for file_mode in ("opt", "sp"):
                         result = process_file(
                             method, bs, file_mode, "no_cat", "reactants", combo,
-                            molecule_fn_opt=build_standard_molecule_section,
-                            molecule_fn_sp=build_sp_standard_molecule_section
+                            molecule_fn=build_standard_molecule_section
                         )
                         if mode == "yield" and result:
                             yield result
@@ -556,8 +620,7 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
                 for file_mode in ("opt", "sp"):
                     result = process_file(
                         method, bs, file_mode, "no_cat", "products", species,
-                        molecule_fn_opt=build_standard_molecule_section,
-                        molecule_fn_sp=build_sp_standard_molecule_section
+                        molecule_fn=build_standard_molecule_section
                     )
                     if mode == "yield" and result:
                         yield result
@@ -566,8 +629,7 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
             for file_mode in ("opt", "sp"):
                 result = process_file(
                     method, bs, file_mode, "no_cat", "ts", "tscomplex",
-                    molecule_fn_opt=build_standard_molecule_section,
-                    molecule_fn_sp=build_sp_standard_molecule_section
+                    molecule_fn=build_standard_molecule_section
                 )
                 if mode == "yield" and result:
                     yield result
@@ -581,8 +643,7 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
                     result = process_file(
                         method, bs, file_mode, "cat", "cat", cat_name,
                         catalyst_name=cat_name,
-                        molecule_fn_opt=build_standard_molecule_section,
-                        molecule_fn_sp=build_sp_standard_molecule_section
+                        molecule_fn=build_standard_molecule_section
                     )
                     if mode == "yield" and result:
                         yield result
@@ -598,8 +659,7 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
                                 method, bs, file_mode, "cat", "preTS", species_combo,
                                 calc_type=calc_type, catalyst_name=cat_name,
                                 template_prefix="preTS_",
-                                molecule_fn_opt=build_fragmented_molecule_section,
-                                molecule_fn_sp=build_sp_fragmented_molecule_section
+                                molecule_fn=build_fragmented_molecule_section
                             )
                             if mode == "yield" and result:
                                 yield result
@@ -615,8 +675,7 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
                                 method, bs, file_mode, "cat", "postTS", species_combo,
                                 calc_type=calc_type, catalyst_name=cat_name,
                                 template_prefix="postTS_",
-                                molecule_fn_opt=build_fragmented_molecule_section,
-                                molecule_fn_sp=build_sp_fragmented_molecule_section
+                                molecule_fn=build_fragmented_molecule_section
                             )
                             if mode == "yield" and result:
                                 yield result
@@ -627,8 +686,7 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
                         result = process_file(
                             method, bs, file_mode, "cat", "ts", f"ts_{cat_name}-tscomplex",
                             calc_type=calc_type, catalyst_name=cat_name,
-                            molecule_fn_opt=build_fragmented_molecule_section,
-                            molecule_fn_sp=build_sp_fragmented_molecule_section
+                            molecule_fn=build_fragmented_molecule_section
                         )
                         if mode == "yield" and result:
                             yield result
