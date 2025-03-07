@@ -2,23 +2,15 @@
 Molecule Builder Module
 
 This module provides functions to build the molecule section for Q-Chem input files.
-The overall charge, multiplicity, and atom list are taken from the composite XYZ file.
-Fragment-specific attributes (atom count, charge, multiplicity) are obtained from cached
-individual files. Naming conventions:
-  - Standard (preTS/postTS): e.g. "lip-methylethanoate-hydroxide.xyz" uses:
-       Catalyst  -> "lip.xyz"
-       Substrate -> "methylethanoate-hydroxide.xyz"
-  - TS: e.g. "ts_lip-complex.xyz" uses:
-       Catalyst  -> "lip.xyz"
-       Substrate -> "ts_complex.xyz"
+For OPT calculations, coordinates come from template XYZ files.
+For SP calculations, coordinates come from previous optimization output files.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 from PyA3EDA.core.parsers.xyz_parser import parse_xyz
 from PyA3EDA.core.parsers.output_xyz_parser import parse_qchem_output_xyz
 
-# Helper functions for formatting
 def _build_standard_section(charge: int, multiplicity: int, atoms: list[str]) -> str:
     """Return a standard molecule section string."""
     return f"{charge} {multiplicity}\n" + "\n".join(atoms)
@@ -31,157 +23,136 @@ def _build_fragmented_section(overall_charge: int, overall_mult: int,
         f"{overall_charge} {overall_mult}\n"
         f"---\n"
         f"{catalyst_charge} {catalyst_mult}\n"
-        f"{chr(10).join(catalyst_atoms)}\n"
+        f"{'\n'.join(catalyst_atoms)}\n"
         f"---\n"
         f"{substrate_charge} {substrate_mult}\n"
-        f"{chr(10).join(substrate_atoms)}"
+        f"{'\n'.join(substrate_atoms)}"
     )
 
-# Original functions for opt jobs using template XYZ.
-def build_standard_molecule_section(xyz_text: str, identifier: str,
-                                    override_charge: Optional[int] = None,
-                                    override_multiplicity: Optional[int] = None) -> str:
-    """
-    Build a standard molecule section from a template XYZ file.
+def _get_coordinates(template_data: dict, output_text: str = None, identifier: str = None) -> list[str]:
+    """Get coordinates from either template or output file with fallback."""
+    if output_text:
+        # SP mode - get coordinates from output file
+        output_data = parse_qchem_output_xyz(output_text, identifier)
+        if output_data:
+            return output_data['atoms']
+        else:
+            # Fall back to template if output parsing fails
+            logging.warning(f"Failed to parse output for '{identifier}', falling back to template")
     
-    Uses the XYZ file specified by 'identifier' to supply the charge, multiplicity, and atom list.
-    """
-    data: Optional[Dict[str, Any]] = parse_xyz(xyz_text, identifier)
-    if data is None:
-        logging.error("Failed to parse XYZ for standard molecule.")
-        return ""
-    charge, mult = data['charge'], data['multiplicity']
-    if override_charge is not None:
-        charge = override_charge
-    if override_multiplicity is not None:
-        mult = override_multiplicity
-    return _build_standard_section(charge, mult, data['atoms'])
+    # Return template coordinates
+    return template_data['atoms']
 
-def build_fragmented_molecule_section(composite_xyz_text: str,
-                                      composite_id: str,
-                                      catalyst_id: Optional[str] = None) -> str:
-    """
-    Build a fragmented molecule section from a composite XYZ file.
+def _parse_composite_id(composite_id: str, catalyst_id: str = None, substrate_id: str = None) -> tuple:
+    """Parse composite identifier into catalyst and substrate IDs."""
+    if catalyst_id is None or substrate_id is None:
+        parts = composite_id.split("-")
+        if len(parts) < 2:
+            logging.error(f"Composite identifier '{composite_id}' does not contain both catalyst and substrate parts")
+            return None, None
+        
+        derived_catalyst_id = parts[0]
+        derived_substrate_id = "-".join(parts[1:])
+        
+        catalyst_id = catalyst_id or derived_catalyst_id
+        substrate_id = substrate_id or derived_substrate_id
     
-    The composite identifier follows the convention: catalyst-substrate1-...
-    Cached data for the catalyst and substrate are retrieved for fragment-specific properties.
+    return catalyst_id, substrate_id
+
+def build_standard_molecule_section(xyz_text: str, identifier: str, output_text: str = None) -> str:
     """
+    Build a standard molecule section for either OPT or SP calculation.
+    
+    Args:
+        xyz_text: XYZ template text
+        identifier: Molecule identifier
+        output_text: If provided, coordinates will be parsed from this output file (SP mode)
+        
+    Returns:
+        Molecule section string
+    """
+    # Parse the template
+    template_data = parse_xyz(xyz_text, identifier)
+    if template_data is None:
+        logging.error(f"Failed to parse XYZ template for '{identifier}'")
+        return ""
+    
+    # Get coordinates from template or output
+    atoms = _get_coordinates(template_data, output_text, identifier)
+        
+    return _build_standard_section(template_data['charge'], template_data['multiplicity'], atoms)
+
+def build_fragmented_molecule_section(composite_xyz_text: str, composite_id: str, 
+                                     catalyst_xyz_text: str = None,
+                                     substrate_xyz_text: str = None,
+                                     catalyst_id: str = None,
+                                     substrate_id: str = None,
+                                     output_text: str = None) -> str:
+    """
+    Build a fragmented molecule section for either OPT or SP calculation.
+    
+    Args:
+        composite_xyz_text: Composite XYZ template text
+        composite_id: Composite molecule identifier (catalyst-substrate)
+        catalyst_xyz_text: XYZ text for the catalyst component
+        substrate_xyz_text: XYZ text for the substrate component
+        catalyst_id: Catalyst identifier (derived from composite_id if not provided)
+        substrate_id: Substrate identifier (derived from composite_id if not provided)
+        output_text: If provided, coordinates will be parsed from this output file (SP mode)
+        
+    Returns:
+        Molecule section string
+    """
+    # Parse the composite ID
+    catalyst_id, substrate_id = _parse_composite_id(composite_id, catalyst_id, substrate_id)
+    if catalyst_id is None or substrate_id is None:
+        return ""
+        
+    # Parse the composite template
     composite_data = parse_xyz(composite_xyz_text, composite_id)
     if composite_data is None:
-        logging.error("Failed to parse composite XYZ.")
+        logging.error(f"Failed to parse composite XYZ for '{composite_id}'")
         return ""
-    overall_charge = composite_data['charge']
-    overall_mult = composite_data['multiplicity']
-    composite_atoms = composite_data['atoms']
-    total_atoms = composite_data['n_atoms']
     
-    parts = composite_id.split("-")
-    if len(parts) < 2:
-        logging.error("Composite identifier does not contain both catalyst and substrate names.")
+    # Parse catalyst template
+    if catalyst_xyz_text is None:
+        logging.error(f"No catalyst XYZ text provided for '{catalyst_id}'")
         return ""
-    catalyst_name = parts[0]
-    substrate_lookup_id = "-".join(parts[1:])
-    
-    catalyst_data = parse_xyz("", catalyst_id if catalyst_id is not None else catalyst_name)
+        
+    catalyst_data = parse_xyz(catalyst_xyz_text, catalyst_id)
     if catalyst_data is None:
-        logging.error(f"No cached data for catalyst with identifier '{catalyst_name}'.")
+        logging.error(f"Failed to parse catalyst XYZ for '{catalyst_id}'")
         return ""
-    substrate_data = parse_xyz("", substrate_lookup_id)
+    
+    # Parse substrate template
+    if substrate_xyz_text is None:
+        logging.error(f"No substrate XYZ text provided for '{substrate_id}'")
+        return ""
+        
+    substrate_data = parse_xyz(substrate_xyz_text, substrate_id)
     if substrate_data is None:
-        logging.error(f"No cached data for substrate with identifier '{substrate_lookup_id}'.")
-        return ""
-        
-    catalyst_N = catalyst_data['n_atoms']
-    substrate_N = substrate_data['n_atoms']
-    if catalyst_N + substrate_N != total_atoms:
-        logging.warning(
-            f"Total atoms in composite ({total_atoms}) do not equal sum of catalyst ({catalyst_N}) and substrate ({substrate_N})."
-        )
-    if len(composite_atoms) < total_atoms:
-        logging.error("Insufficient atom lines in composite data.")
+        logging.error(f"Failed to parse substrate XYZ for '{substrate_id}'")
         return ""
     
-    catalyst_atoms = composite_atoms[:catalyst_N]
-    substrate_atoms = composite_atoms[catalyst_N : catalyst_N + substrate_N]
+    # Get fragment sizes
+    catalyst_atom_count = catalyst_data['n_atoms']
+    substrate_atom_count = substrate_data['n_atoms']
+    total_atoms = catalyst_atom_count + substrate_atom_count
     
-    return _build_fragmented_section(overall_charge, overall_mult,
-                                     catalyst_data['charge'], catalyst_data['multiplicity'], catalyst_atoms,
-                                     substrate_data['charge'], substrate_data['multiplicity'], substrate_atoms)
-
-# Functions for single-point (SP) jobs using coordinates from the output file.
-def build_sp_standard_molecule_section(output_text: str, template_xyz_text: str, identifier: str,
-                                       override_charge: Optional[int] = None,
-                                       override_multiplicity: Optional[int] = None) -> str:
-    """
-    Build a standard molecule section for a single-point calculation.
+    # Get coordinates from template or output
+    atoms = _get_coordinates(composite_data, output_text, composite_id)
     
-    Retrieves charge and multiplicity from the template XYZ and updates coordinates
-    using output file data.
-    """
-    cached_data: Optional[Dict[str, Any]] = parse_xyz(template_xyz_text, identifier)
-    if cached_data is None:
-        logging.error(f"Failed to retrieve cached XYZ data for '{identifier}'.")
-        return ""
-    parsed_out: Optional[Dict[str, Any]] = parse_qchem_output_xyz(output_text, identifier)
-    if parsed_out is None:
-        logging.error("Failed to parse output file for updated coordinates.")
-        return ""
-        
-    charge = cached_data['charge']
-    multiplicity = cached_data['multiplicity']
-    if override_charge is not None:
-        charge = override_charge
-    if override_multiplicity is not None:
-        multiplicity = override_multiplicity
-    return _build_standard_section(charge, multiplicity, parsed_out['atoms'])
-
-def build_sp_fragmented_molecule_section(output_text: str, composite_xyz_text: str,
-                                           composite_id: str, catalyst_id: Optional[str] = None) -> str:
-    """
-    Build a fragmented molecule section for a single-point calculation.
-    
-    Uses cached composite data for charge/multiplicity and fragment properties,
-    but updates the coordinate blocks with those parsed from the output file.
-    """
-    composite_data: Optional[Dict[str, Any]] = parse_xyz(composite_xyz_text, composite_id)
-    if composite_data is None:
-        logging.error("Failed to parse composite XYZ template.")
-        return ""
-    parsed_composite: Optional[Dict[str, Any]] = parse_qchem_output_xyz(output_text, composite_id)
-    if parsed_composite is None:
-        logging.error("Failed to parse output for composite coordinates.")
+    # Ensure we have enough atoms
+    if len(atoms) < total_atoms:
+        logging.error(f"Insufficient atom lines for '{composite_id}'. Expected {total_atoms}, got {len(atoms)}.")
         return ""
     
-    overall_charge = composite_data['charge']
-    overall_mult = composite_data['multiplicity']
-    total_atoms = composite_data['n_atoms']
-    new_atoms = parsed_composite['atoms']
+    # Split atoms between catalyst and substrate
+    catalyst_atoms = atoms[:catalyst_atom_count]
+    substrate_atoms = atoms[catalyst_atom_count:catalyst_atom_count + substrate_atom_count]
     
-    parts = composite_id.split("-")
-    if len(parts) < 2:
-        logging.error("Composite identifier does not contain both catalyst and substrate names.")
-        return ""
-    catalyst_name = parts[0]
-    substrate_lookup_id = "-".join(parts[1:])
-    
-    catalyst_data = parse_xyz("", catalyst_id if catalyst_id is not None else catalyst_name)
-    if catalyst_data is None:
-        logging.error(f"No cached data for catalyst with identifier '{catalyst_name}'.")
-        return ""
-    substrate_data = parse_xyz("", substrate_lookup_id)
-    if substrate_data is None:
-        logging.error(f"No cached data for substrate with identifier '{substrate_lookup_id}'.")
-        return ""
-    catalyst_N = catalyst_data['n_atoms']
-    substrate_N = substrate_data['n_atoms']
-    
-    if len(new_atoms) < total_atoms:
-        logging.error("Insufficient atom lines in output composite data.")
-        return ""
-        
-    new_catalyst_atoms = new_atoms[:catalyst_N]
-    new_substrate_atoms = new_atoms[catalyst_N : catalyst_N + substrate_N]
-    
-    return _build_fragmented_section(overall_charge, overall_mult,
-                                     catalyst_data['charge'], catalyst_data['multiplicity'], new_catalyst_atoms,
-                                     substrate_data['charge'], substrate_data['multiplicity'], new_substrate_atoms)
+    return _build_fragmented_section(
+        composite_data['charge'], composite_data['multiplicity'],
+        catalyst_data['charge'], catalyst_data['multiplicity'], catalyst_atoms,
+        substrate_data['charge'], substrate_data['multiplicity'], substrate_atoms
+    )
