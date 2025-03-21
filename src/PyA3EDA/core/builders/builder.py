@@ -171,12 +171,22 @@ def get_rem_section(system_dir: Path, calc: str, rem: dict, category: str, branc
                     mode: str, method: str, basis: str) -> str:
     """
     Returns the REM section. For sp mode, uses sp builder; for opt mode, uses the opt builder.
+    
+    For SP mode, sets special parameters:
+    - eda2: Set to 0 for no_cat or cat branch, otherwise from rem dict
+    - scfmi_freeze_ss: Set to 1 for frz_cat calculations, 0 otherwise
     """
     if mode == "sp":
+        # Set eda2 parameter
         eda2 = "0" if category == "no_cat" or branch == "cat" else rem.get("eda2", "0")
+        
+        # Set scfmi_freeze_ss parameter
+        scfmi_freeze_ss = "1" if calc == "frz_cat" else "0"
+        
         return rem_builder.build_rem_section_for_sp(
             system_dir, method, basis,
-            rem.get("dispersion", "false"), rem.get("solvent", "false"), eda2
+            rem.get("dispersion", "false"), rem.get("solvent", "false"),
+            eda2, scfmi_freeze_ss
         )
     else:
         jobtype = "ts" if branch == "ts" else ("sp" if len(rem.get("molecule_section", "").splitlines()) - 1 == 1 else "opt")
