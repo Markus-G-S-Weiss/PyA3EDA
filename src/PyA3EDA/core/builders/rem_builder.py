@@ -57,20 +57,19 @@ def build_rem_section_for_opt(system_dir: Path, calc_type: str, method: str,
                           solvent=solvent, jobtype=jobtype)
 
 def build_rem_section_for_sp(system_dir: Path, method: str, basis: str,
-                             dispersion: str, solvent: str, eda2: str) -> str:
+                             dispersion: str, solvent: str, eda2: str, scfmi_freeze_ss: str) -> str:
     """
     Builds and returns the REM section for single‐point (sp) calculations.
     
     Uses rem_sp_eda_base.rem as the base REM template.
-    Substitutions include: method, basis, dispersion, solvent, and eda2.
-    
-    Note: Additional solvent REM text (if any) should be appended later (e.g. in the base_template.in).
+    Substitutions include: method, basis, dispersion, solvent, eda2, and scfmi_freeze_ss.
     """
     rem_dir = system_dir / "templates" / "rem"
     base_path = rem_dir / "rem_sp_eda_base.rem"
     
-    # SP doesn't use calc_type, so we just build the base template
+    # Load the template
     template = _build_rem_template(base_path)
     
+    # Return the formatted template with all parameters
     return template.format(method=method, basis=basis, dispersion=dispersion,
-                          solvent=solvent, eda2=eda2)
+                          solvent=solvent, eda2=eda2, scfmi_freeze_ss=scfmi_freeze_ss)

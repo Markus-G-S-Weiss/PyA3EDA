@@ -12,7 +12,7 @@ from typing import Tuple, Iterator, Dict, List
 from PyA3EDA.core.constants import Constants
 from PyA3EDA.core.utils.file_utils import read_text
 from PyA3EDA.core.parsers.qchem_status_parser import parse_qchem_status
-from PyA3EDA.core.builders import builder
+from PyA3EDA.core.builders.builder import iter_input_paths
 
 # Create a separate logger for summary that uses a simple formatter.
 summary_logger = logging.getLogger("summary_logger")
@@ -22,13 +22,6 @@ if not summary_logger.handlers:
     summary_logger.addHandler(handler)
     summary_logger.propagate = False
 
-def iter_status_input_paths(config: dict, system_dir: Path) -> Iterator[Path]:
-    """
-    Yields expected Q-Chem input paths using the builder's iterator.
-    Builder.iter_input_paths now yields both opt and, if enabled (sp.enabled True),
-    the corresponding single-point (SP) input file paths.
-    """
-    yield from builder.iter_input_paths(config, system_dir)
 
 def get_status_for_file(input_file: Path) -> Tuple[str, str]:
     """
@@ -45,6 +38,7 @@ def get_status_for_file(input_file: Path) -> Tuple[str, str]:
     submission_exists = bool(list(input_file.parent.glob(submission_pattern)))
     
     return parse_qchem_status(content, err_content, submission_exists)
+
 
 def should_process_file(input_file: Path, criteria: str) -> Tuple[bool, str]:
     """
@@ -131,6 +125,7 @@ def group_paths_by_method_basis(paths: List[Path], system_dir: Path) -> Dict[str
     
     return groups
 
+
 def print_group_status(group_key: str, paths: List[Path], system_dir: Path) -> Dict[str, int]:
     """
     Checks statuses for paths in this group, prints a formatted report including the calculation mode
@@ -168,6 +163,7 @@ def print_group_status(group_key: str, paths: List[Path], system_dir: Path) -> D
         summary_logger.info(f"    {s} : {count}")
     return group_counts
 
+
 def check_all_statuses(config: dict, system_dir: Path) -> None:
     """
     Iterates over expected input paths (grouped by method_basis), checks their statuses on the fly,
@@ -175,7 +171,7 @@ def check_all_statuses(config: dict, system_dir: Path) -> None:
     an overall status summary.
     """
     logging.info(f"Status checking started:")
-    paths = list(iter_status_input_paths(config, system_dir))
+    paths = list(iter_input_paths(config, system_dir))
     if not paths:
         logging.info("No input paths available for status checking.")
         return

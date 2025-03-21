@@ -1,7 +1,7 @@
 """
 WorkflowManager
 
-Orchestrates the input file generation workflow for PyA3EDA.
+Orchestrates the workflow for PyA3EDA.
 """
 
 import logging
@@ -30,33 +30,16 @@ class WorkflowManager:
         """
         Run calculations based on the specified run criteria.
         """
-        from PyA3EDA.core.builders.builder import iter_input_paths
-        from PyA3EDA.core.status.status_checker import should_process_file
-        from PyA3EDA.core.runners.executor import execute_qchem
+        from PyA3EDA.core.runners.executor import run_all_calculations
         
         # Extract run criteria from args with safe defaults
         run_criteria = getattr(self.args, 'run', None) if self.args else None
         
-        if not run_criteria:
-            logging.warning("No run criteria specified. Use --run option with a valid criteria.")
-            return
-        
-        logging.info(f"Running calculations with criteria: {run_criteria}")
-        
-        # Get all input paths and process them based on criteria
-        count = 0
-        for input_path in iter_input_paths(self.config_manager.processed_config, self.system_dir):
-            if not input_path.exists():
-                continue
-            
-            should_run, reason = should_process_file(input_path, run_criteria)
-                
-            if should_run:
-                logging.info(f"Submitting job ({reason}): {input_path.relative_to(self.system_dir)}")
-                if execute_qchem(input_path):
-                    count += 1
-        
-        logging.info(f"Total jobs submitted: {count}")
+        run_all_calculations(
+            self.config_manager.processed_config,
+            self.system_dir,
+            run_criteria
+        )
 
     def check_status(self) -> None:
         """
@@ -67,4 +50,24 @@ class WorkflowManager:
         check_all_statuses(self.config_manager.processed_config, self.system_dir)
 
     def extract_data(self) -> None:
-         logging.info("Data extraction not implemented.")
+        """
+        Extract data from output files and save to CSV.
+        """
+        from PyA3EDA.core.exporters.data_exporter import extract_and_save
+        
+        # Get extraction criteria
+        # If extract is a boolean flag, convert to string criteria
+        if hasattr(self.args, 'extract'):
+            if self.args.extract is True:
+                criteria = "SUCCESSFUL"  # Default when -e flag is used
+            else:
+                criteria = self.args.extract  # If it's a string value
+        else:
+            criteria = "SUCCESSFUL"  # Default if not specified
+        
+        # Let data_exporter handle the results directory creation
+        extract_and_save(
+            self.config_manager.processed_config,
+            self.system_dir,
+            criteria=criteria
+        )
