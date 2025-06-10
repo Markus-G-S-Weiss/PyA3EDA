@@ -33,11 +33,11 @@ class ConfigManager:
         """
         Converts a value (which can be given as a single value or a list of values)
         into a dictionary with:
-          • "original_opt": The raw opt value.
-          • "original_sp": The raw sp value if provided, else None.
-          • "opt": The sanitized opt value.
-          • "sp": The sanitized sp value if provided, otherwise an empty string.
-          • "sp_enabled": True if an sp value was provided and it differs from opt.
+          - "original_opt": The raw opt value.
+          - "original_sp": The raw sp value if provided, else None.
+          - "opt": The sanitized opt value.
+          - "sp": The sanitized sp value if provided, otherwise an empty string.
+          - "sp_enabled": True if an sp value was provided and it differs from opt.
         If val is absent, the default is used.
         """
         if not val:
