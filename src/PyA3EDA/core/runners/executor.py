@@ -8,8 +8,8 @@ import subprocess
 import time
 from pathlib import Path
 
-def execute_qchem(input_file: Path, cores: int = 32, time_limit: str = "30-00:00:00", 
-                 node: str = "compute-2-09-05,compute-2-07-01,compute-2-07-02") -> bool:
+def execute_qchem(input_file: Path, cores: int = 64, time_limit: str = "30-00:00:00", 
+                 node: str = "c-06-11,c-06-12") -> bool:
     """Execute a Q-Chem calculation using qqchem submission script."""
     logging.info(f'Executing qqchem for {input_file}')
     try:

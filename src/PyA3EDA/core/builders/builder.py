@@ -216,44 +216,15 @@ def build_file_path(system_dir: Path, method: str, basis: str, dispersion: str, 
         top_solvent = opt_params.get("solvent")
         suffix = "_sp.in"
 
-        # Create sp_folder name without "false" values
-        sp_folder_parts = [method]
-        
-        # Only include dispersion if not false
-        if dispersion and dispersion.lower() != "false":
-            sp_folder_parts.append(dispersion)
-            
-        # Always include basis set
-        sp_folder_parts.append(basis)
-        
-        # Only include solvent if not false
-        if solvent and solvent.lower() != "false":
-            sp_folder_parts.append(solvent)
-        
-        # Add sp suffix
-        sp_folder_parts.append("sp")
-        
-        # Join parts with underscores
-        sp_folder = "_".join(sp_folder_parts)
+        # Create sp_folder name using the centralized function
+        sp_folder_base = build_method_folder_name(method, basis, dispersion, solvent)
+        sp_folder = f"{sp_folder_base}_sp"
     else:
         raise ValueError(f"Unknown mode: {mode}")
   
-    # Create folder name without "false" values
-    folder_parts = [top_method]
-    
-    # Only include dispersion if not false
-    if top_disp and top_disp.lower() != "false":
-        folder_parts.append(top_disp)
-        
-    # Always include basis set
-    folder_parts.append(top_basis)
-    
-    # Only include solvent if not false
-    if top_solvent and top_solvent.lower() != "false":
-        folder_parts.append(top_solvent)
-    
-    # Join parts with underscores
-    base_folder = system_dir / "_".join(folder_parts)
+    # Create base folder name using the centralized function
+    base_folder_name = build_method_folder_name(top_method, top_basis, top_disp, top_solvent)
+    base_folder = system_dir / base_folder_name
   
     if category == "no_cat":
         if branch in ("reactants", "products"):
@@ -271,6 +242,7 @@ def build_file_path(system_dir: Path, method: str, basis: str, dispersion: str, 
     elif category == "cat":
         if not catalyst_name:
             raise ValueError("For catalyst cases, catalyst_name must be provided.")
+        
         if branch == "preTS":
             if mode == "opt":
                 relative = Path(catalyst_name) / "preTS" / species / calc_type / f"preTS_{species}_{calc_type}{suffix}"
@@ -490,6 +462,93 @@ def get_combinations(species_list, min_length=2):
             yield "-".join(spec["name"]["opt"] for spec in combo)
 
 
+def build_method_folder_name(method: str, basis: str, dispersion: str, solvent: str) -> str:
+    """
+    Build a method folder name by filtering out 'false' values.
+    Used consistently for both OPT and SP folder naming.
+    """
+    folder_parts = [method]
+    
+    # Only include dispersion if not false
+    if dispersion and dispersion.lower() != "false":
+        folder_parts.append(dispersion)
+        
+    # Always include basis set
+    folder_parts.append(basis)
+    
+    # Only include solvent if not false
+    if solvent and solvent.lower() != "false":
+        folder_parts.append(solvent)
+    
+    # Join parts with underscores
+    return "_".join(folder_parts)
+
+
+def create_file_metadata(method: dict, bs: dict, file_mode: str, category: str, 
+                        branch: str, species: str, calc_type: str, catalyst_name: str,
+                        file_path: Path) -> dict:
+    """
+    Create standardized metadata for a file.
+    Centralized function to ensure consistency.
+    """
+    if file_mode == "opt":
+        method_combo = build_method_folder_name(
+            method["name"]["opt"],
+            bs["opt"],
+            method["dispersion"]["opt"],
+            method["solvent"]["opt"]
+        )
+        
+        return {
+            "Method": method["name"]["opt"],
+            "Method_Combo": method_combo,
+            "Basis": bs["opt"],
+            "Dispersion": method["dispersion"]["opt"],
+            "Solvent": method["solvent"]["opt"],
+            "Category": category,
+            "Branch": branch,
+            "Species": species,
+            "Calc_Type": calc_type,
+            "Catalyst": catalyst_name,
+            "Mode": file_mode,
+            "Path": str(file_path)
+        }
+    else:  # sp
+        base_method_combo = build_method_folder_name(
+            method["name"]["opt"],
+            bs["opt"],
+            method["dispersion"]["opt"],
+            method["solvent"]["opt"]
+        )
+        
+        sp_method_combo = build_method_folder_name(
+            method["name"]["sp"],
+            bs["sp"],
+            method["dispersion"]["sp"],
+            method["solvent"]["sp"]
+        )
+        
+        return {
+            "Method": method["name"]["opt"],
+            "Method_Combo": base_method_combo,
+            "SP_Method": method["name"]["sp"],
+            "SP_Method_Combo": sp_method_combo,
+            "Basis": bs["opt"],
+            "SP_Basis": bs["sp"],
+            "Dispersion": method["dispersion"]["opt"],
+            "SP_Dispersion": method["dispersion"]["sp"],
+            "Solvent": method["solvent"]["opt"],
+            "SP_Solvent": method["solvent"]["sp"],
+            "Category": category,
+            "Branch": branch,
+            "Species": species,
+            "Calc_Type": calc_type,
+            "Catalyst": catalyst_name,
+            "Mode": file_mode,
+            "Path": str(file_path)
+        }
+
+
 def process_input_files(config_manager, system_dir: Path, mode: str = "generate",
                        overwrite: str = None, sp_strategy: str = "smart"):
     """
@@ -518,56 +577,51 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
         """
         Process a single input file - either yield its path or build and write it.
         """
+        nonlocal processed_opt_files
+        
         if file_mode == "sp" and not (method["name"].get("sp_enabled", False) and bs.get("sp_enabled", False)):
             return
 
-        # Always build the file path
+        # Build file path
         if file_mode == "opt":
             file_path = build_file_path(
-                system_dir,
-                method["name"]["opt"],
-                bs["opt"], 
-                method["dispersion"]["opt"],
-                method["solvent"]["opt"],
-                category, branch, species, calc_type, catalyst_name,
-                mode=file_mode
+                system_dir, method["name"]["opt"], bs["opt"], 
+                method["dispersion"]["opt"], method["solvent"]["opt"],
+                category, branch, species, calc_type, catalyst_name, mode=file_mode
             )
             
-            # Create a unique key for this OPT file
+            # Check for duplicates
             opt_key = (
                 method["name"]["opt"], bs["opt"], 
                 method["dispersion"]["opt"], method["solvent"]["opt"],
                 category, branch, species, calc_type, catalyst_name
             )
             
-            # If we've already processed this exact OPT file, skip it
             if opt_key in processed_opt_files:
                 if mode == "yield":
                     return None
+                return
             else:
-                # Otherwise mark it as processed
                 processed_opt_files.add(opt_key)
-                
         else:  # sp
             file_path = build_file_path(
-                system_dir,
-                method["name"]["sp"],
-                bs["sp"],
-                method["dispersion"]["sp"],
-                method["solvent"]["sp"],
-                category, branch, species, calc_type, catalyst_name,
-                mode=file_mode,
+                system_dir, method["name"]["sp"], bs["sp"],
+                method["dispersion"]["sp"], method["solvent"]["sp"],
+                category, branch, species, calc_type, catalyst_name, mode=file_mode,
                 opt_params={
-                    "method": method["name"]["opt"],
-                    "basis": bs["opt"],
-                    "dispersion": method["dispersion"]["opt"],
-                    "solvent": method["solvent"]["opt"]
+                    "method": method["name"]["opt"], "basis": bs["opt"],
+                    "dispersion": method["dispersion"]["opt"], "solvent": method["solvent"]["opt"]
                 }
             )
         
-        # For yield mode, just yield the path
+        # Create metadata using centralized function
+        metadata = create_file_metadata(method, bs, file_mode, category, branch, 
+                                    species, calc_type, catalyst_name, file_path)
+        
+        # For yield mode, return path with metadata
         if mode == "yield":
-            return file_path
+            from types import SimpleNamespace
+            return SimpleNamespace(path=file_path, metadata=metadata)
         
         # For generate mode, build and write the file
         sanitized, original = config_manager.get_common_values(method, bs, file_mode)
@@ -710,6 +764,15 @@ def generate_all_inputs(config_manager, system_dir: Path, overwrite: str = None,
     list(process_input_files(config_manager, system_dir, "generate", overwrite, sp_strategy))
 
 
-def iter_input_paths(config_manager, system_dir: Path):
-    """Iterates through the unified config from config_manager and yields input file paths."""
-    yield from process_input_files(config_manager, system_dir, "yield")
+def iter_input_paths(config, system_dir: Path, include_metadata: bool = False):
+    """
+    Iterate through all input file paths, optionally with metadata.
+    This function was missing and is needed by the data extractor.
+    """
+    # Use the existing process_input_files function in yield mode
+    for result in process_input_files(config, system_dir, mode="yield"):
+        if result:
+            if include_metadata:
+                yield result  # Return the full object with path and metadata
+            else:
+                yield result.path if hasattr(result, 'path') else result

@@ -4,74 +4,74 @@ Path Utilities Module
 Provides functions for working with paths, including grouping and metadata extraction.
 """
 
-import logging
-from pathlib import Path
-from typing import Dict, Any
+# import logging
+# from pathlib import Path
+# from typing import Dict, Any
 
 
-def extract_path_metadata(path: Path, system_dir: Path = None) -> Dict[str, Any]:
-    """
-    Extract standardized metadata from a file path.
-    """
-    metadata = {}
+# def extract_path_metadata(path: Path, system_dir: Path = None) -> Dict[str, Any]:
+#     """
+#     Extract standardized metadata from a file path.
+#     """
+#     metadata = {}
     
-    if not system_dir:
-        logging.warning(f"Cannot extract path metadata: system_dir not provided for {path}")
-        return metadata
+#     if not system_dir:
+#         logging.warning(f"Cannot extract path metadata: system_dir not provided for {path}")
+#         return metadata
         
-    try:
-        # Convert to relative path
-        rel_path = path.relative_to(system_dir)
-        path_str = str(rel_path)
-        parts = rel_path.parts
+#     try:
+#         # Convert to relative path
+#         rel_path = path.relative_to(system_dir)
+#         path_str = str(rel_path)
+#         parts = rel_path.parts
         
-        # Basic metadata
-        if len(parts) >= 1:
-            metadata["Method"] = parts[0]
-        else:
-            logging.warning(f"Cannot extract Method from path: {path_str}")
+#         # Basic metadata
+#         if len(parts) >= 1:
+#             metadata["Method"] = parts[0]
+#         else:
+#             logging.warning(f"Cannot extract Method from path: {path_str}")
         
-        if len(parts) >= 2:
-            metadata["Category"] = parts[1]
-        else:
-            logging.warning(f"Cannot extract Category from path: {path_str}")
+#         if len(parts) >= 2:
+#             metadata["Category"] = parts[1]
+#         else:
+#             logging.warning(f"Cannot extract Category from path: {path_str}")
             
-        if len(parts) >= 3:
-            metadata["Branch"] = parts[2]
-        else:
-            logging.warning(f"Cannot extract Branch from path: {path_str}")
+#         if len(parts) >= 3:
+#             metadata["Branch"] = parts[2]
+#         else:
+#             logging.warning(f"Cannot extract Branch from path: {path_str}")
         
-        # Extract calculation type
-        if "full_cat" in path_str:
-            metadata["Calc_Type"] = "full_cat"
-        elif "pol_cat" in path_str:
-            metadata["Calc_Type"] = "pol_cat"
-        elif "frz_cat" in path_str:
-            metadata["Calc_Type"] = "frz_cat"
+#         # Extract calculation type
+#         if "full_cat" in path_str:
+#             metadata["Calc_Type"] = "full_cat"
+#         elif "pol_cat" in path_str:
+#             metadata["Calc_Type"] = "pol_cat"
+#         elif "frz_cat" in path_str:
+#             metadata["Calc_Type"] = "frz_cat"
         
-        # Extract mode and SP method
-        if path.stem.endswith("_sp"):
-            metadata["Mode"] = "sp"
-            # Find SP folder
-            sp_folder_found = False
-            for part in parts:
-                if part.endswith("_sp"):
-                    metadata["SP_Method"] = part[:-3]
-                    sp_folder_found = True
-                    break
-            if not sp_folder_found:
-                logging.warning(f"SP file without identifiable SP method folder: {path_str}")
-        else:
-            metadata["Mode"] = "opt"
+#         # Extract mode and SP method
+#         if path.stem.endswith("_sp"):
+#             metadata["Mode"] = "sp"
+#             # Find SP folder
+#             sp_folder_found = False
+#             for part in parts:
+#                 if part.endswith("_sp"):
+#                     metadata["SP_Method"] = part[:-3]
+#                     sp_folder_found = True
+#                     break
+#             if not sp_folder_found:
+#                 logging.warning(f"SP file without identifiable SP method folder: {path_str}")
+#         else:
+#             metadata["Mode"] = "opt"
             
-        # Add identifier and path
-        metadata["Identifier"] = path.stem
-        metadata["Path"] = path_str
+#         # Add identifier and path
+#         metadata["Identifier"] = path.stem
+#         metadata["Path"] = path_str
         
-    except Exception as e:
-        logging.warning(f"Error extracting metadata from path {path}: {str(e)}")
+#     except Exception as e:
+#         logging.warning(f"Error extracting metadata from path {path}: {str(e)}")
         
-    return metadata
+#     return metadata
 # def extract_metadata_from_path(file_path: Path, system_dir: Path) -> Dict[str, str]:
 #     """
 #     Extract metadata from a file path based on the PyA3EDA directory structure.
