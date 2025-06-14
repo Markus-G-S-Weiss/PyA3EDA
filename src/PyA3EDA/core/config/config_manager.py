@@ -15,8 +15,14 @@ from PyA3EDA.core.utils.file_utils import sanitize_filename
 
 class ConfigManager:
     def __init__(self, config_path: str) -> None:
+        self.config_path = Path(config_path).resolve()  # Store as Path object
         self.config: Dict[str, Any] = self._load_config(config_path)
         self.processed_config: Dict[str, Any] = self._process_config()
+
+    @property
+    def config_dir(self) -> Path:
+        """Return the directory containing the config file."""
+        return self.config_path.parent
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         config_file = Path(config_path)

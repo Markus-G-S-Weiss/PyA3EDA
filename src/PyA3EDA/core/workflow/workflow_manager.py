@@ -11,7 +11,7 @@ from PyA3EDA.core.config.config_manager import ConfigManager
 class WorkflowManager:
     def __init__(self, config_manager: ConfigManager, args=None) -> None:
         self.config_manager = config_manager
-        self.system_dir = Path.cwd()
+        self.system_dir = config_manager.config_dir
         self.args = args
 
     def generate_inputs(self) -> None:
