@@ -9,13 +9,14 @@ from typing import Dict, Any, Optional, List
 from collections import defaultdict
 
 from PyA3EDA.core.utils.file_utils import read_text
-from PyA3EDA.core.parsers.qchem_result_parser import parse_thermodynamic_data
+from PyA3EDA.core.parsers.qchem_result_parser import parse_thermodynamic_data, parse_sp_thermodynamic_data
 from PyA3EDA.core.status.status_checker import should_process_file
 
 
 def extract_data_from_output(output_path: Path, metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Extract data from a Q-Chem output file using provided metadata.
+    Uses appropriate parser based on calculation mode.
     """
     # Read content
     content = read_text(output_path)
@@ -23,8 +24,19 @@ def extract_data_from_output(output_path: Path, metadata: Dict[str, Any]) -> Opt
         logging.warning(f"Could not read content from: {output_path}")
         return None
     
-    # Parse thermodynamic data
-    thermo_data = parse_thermodynamic_data(content)
+    # Determine which parser to use based on mode from metadata
+    mode = metadata.get("Mode", "unknown")
+    
+    if mode == "opt":
+        # Use OPT parser for optimization calculations
+        thermo_data = parse_thermodynamic_data(content)
+    elif mode == "sp":
+        # Use SP parser for single point calculations
+        thermo_data = parse_sp_thermodynamic_data(content)
+    else:
+        logging.warning(f"Unknown calculation mode '{mode}' for: {output_path}")
+        return None
+    
     if not thermo_data:
         logging.warning(f"Failed to parse thermodynamic data from: {output_path}")
         return None

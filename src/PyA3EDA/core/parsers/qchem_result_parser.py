@@ -144,3 +144,17 @@ def parse_thermodynamic_data(content: str) -> Dict[str, Any]:
     data["Fallback Used"] = "Yes" if fallback_used else "No"
     
     return data
+
+def parse_sp_thermodynamic_data(content: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse thermodynamic data from SP (Single Point) Q-Chem output files.
+    SP files have different patterns than OPT files.
+    
+    Args:
+        content: Raw text content of the SP output file
+        
+    Returns:
+        Dictionary containing parsed SP data or None if parsing fails
+    """
+    # TODO: Implement SP-specific parsing patterns
+    pass
