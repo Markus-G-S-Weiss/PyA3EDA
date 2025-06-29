@@ -34,8 +34,15 @@ def get_status_for_file(input_file: Path) -> Tuple[str, str]:
     
     # Check if job is still running based on submission file
     input_stem = input_file.stem
-    submission_pattern = f"{input_stem}.in_[0-9]*.[0-9]*"
-    submission_exists = bool(list(input_file.parent.glob(submission_pattern)))
+    # Pattern 1: filename.in_jobid.taskid 
+    submission_pattern1 = f"{input_stem}.in_[0-9]*.[0-9]*"
+    # Pattern 2: .filename.in.jobid.qcin.taskid
+    submission_pattern2 = f".{input_stem}.in.[0-9]*.qcin.[0-9]*"
+    
+    submission_exists = (
+        bool(list(input_file.parent.glob(submission_pattern1))) or
+        bool(list(input_file.parent.glob(submission_pattern2)))
+    )
     
     return parse_qchem_status(content, err_content, submission_exists)
 
