@@ -51,21 +51,15 @@ class WorkflowManager:
 
     def extract_data(self) -> None:
         """
-        Extract data from output files and save to CSV.
+        Extract data from output files and save to all formats.
         """
-        from PyA3EDA.core.exporters.data_exporter import extract_and_save
+        from PyA3EDA.core.extractors.data_extractor import extract_and_save
         
-        # Get extraction criteria
-        # If extract is a boolean flag, convert to string criteria
-        if hasattr(self.args, 'extract'):
-            if self.args.extract is True:
-                criteria = "SUCCESSFUL"  # Default when -e flag is used
-            else:
-                criteria = self.args.extract  # If it's a string value
-        else:
-            criteria = "SUCCESSFUL"  # Default if not specified
+        # Extract criteria from args with safe defaults
+        criteria = getattr(self.args, 'extract', None) if self.args else None
+        if not criteria:
+            criteria = "SUCCESSFUL"  # Default when no criteria specified
         
-        # Let data_exporter handle the results directory creation
         extract_and_save(
             self.config_manager.processed_config,
             self.system_dir,

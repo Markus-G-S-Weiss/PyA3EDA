@@ -23,7 +23,8 @@ def parse_arguments():
     parser.add_argument("-r", "--run", type=str,
                         choices=["all", "nofile", "CRASH", "terminated", "SUCCESSFUL", "running"],
                         help="Execute input files based on their status")
-    parser.add_argument("-e", "--extract", action="store_true",
+    parser.add_argument("-e", "--extract", type=str,
+                        choices=["all", "nofile", "CRASH", "terminated", "SUCCESSFUL", "running"],
                         help="Extract data from output files and generate energy profiles")
     parser.add_argument("--sp-strategy", type=str, default="smart",
                         choices=["always", "smart", "never"],
