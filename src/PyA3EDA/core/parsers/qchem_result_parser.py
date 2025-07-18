@@ -56,7 +56,7 @@ def get_value_with_fallback(content: str, primary_pattern: Pattern, fallback_pat
     return None, None, False
 
 
-def extract_single_value(content: str, pattern: Pattern, field_mapping: Dict[str, str] = None) -> Dict[str, Any]:
+def get_single_value(content: str, pattern: Pattern, field_mapping: Dict[str, str] = None) -> Dict[str, Any]:
     """
     Extract single value from pattern and format according to field mapping.
     
@@ -148,24 +148,24 @@ def parse_thermodynamic_data(content: str) -> Dict[str, Any]:
             fallback_used = True
 
     # Optimization status
-    opt_data = extract_single_value(content, PATTERNS["optimization_status"], {1: "status"})
+    opt_data = get_single_value(content, PATTERNS["optimization_status"], {1: "status"})
     if opt_data:
         data["Optimization Status"] = opt_data["status"]
 
     # Temperature and pressure
-    thermo_data = extract_single_value(content, PATTERNS["thermodynamics"], {1: "temperature", 2: "pressure"})
+    thermo_data = get_single_value(content, PATTERNS["thermodynamics"], {1: "temperature", 2: "pressure"})
     if thermo_data:
         data["Temperature (K)"] = thermo_data["temperature"]
         data["Pressure (atm)"] = thermo_data["pressure"]
 
     # QRRHO parameters
-    qrrho_data = extract_single_value(content, PATTERNS["qrrho_parameters"], {1: "alpha", 2: "omega"})
+    qrrho_data = get_single_value(content, PATTERNS["qrrho_parameters"], {1: "alpha", 2: "omega"})
     if qrrho_data:
         data["Alpha"] = qrrho_data["alpha"]
         data["Omega (cm^-1)"] = qrrho_data["omega"]
 
     # Imaginary frequencies
-    freq_data = extract_single_value(content, PATTERNS["imaginary_frequencies"], {1: "count"})
+    freq_data = get_single_value(content, PATTERNS["imaginary_frequencies"], {1: "count"})
     if freq_data:
         data["Imaginary Frequencies"] = freq_data["count"]
 
