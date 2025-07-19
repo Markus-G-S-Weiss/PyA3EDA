@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from collections import defaultdict
 
 from PyA3EDA.core.utils.file_utils import write_text
+from PyA3EDA.core.utils.xyz_format_utils import format_xyz_content
 
 
 def export_all_formats(extracted_data: List[Dict[str, Any]], output_dir: Path) -> Dict[str, Any]:
@@ -183,16 +184,7 @@ def create_xyz_content(data: Dict[str, Any]) -> str:
     charge = data.get('Charge', 0)
     multiplicity = data.get('Multiplicity', 1)
     
-    if not atoms:
-        return ""
-    
-    content_lines = [
-        str(n_atoms),
-        f"{charge} {multiplicity}"
-    ]
-    content_lines.extend(atoms)
-    
-    return "\n".join(content_lines) + "\n"
+    return format_xyz_content(n_atoms, charge, multiplicity, atoms)
 
 
 def save_csv_file(df: pd.DataFrame, file_path: Path) -> bool:

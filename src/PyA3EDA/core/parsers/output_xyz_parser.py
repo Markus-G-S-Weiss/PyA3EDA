@@ -1,5 +1,6 @@
 import re
 from typing import Optional, Dict, Any
+from PyA3EDA.core.utils.xyz_format_utils import format_xyz_coordinate_line
 
 def parse_qchem_output_xyz(out_text: str, identifier: str) -> Optional[Dict[str, Any]]:
     """
@@ -42,7 +43,7 @@ def parse_qchem_output_xyz(out_text: str, identifier: str) -> Optional[Dict[str,
             x = float(match.group(2))
             y = float(match.group(3))
             z = float(match.group(4))
-            atoms.append(f"{element}   {x:14.10f}   {y:14.10f}   {z:14.10f}")
+            atoms.append(format_xyz_coordinate_line(element, x, y, z))
     
     if not atoms:
         return None
