@@ -2,7 +2,12 @@
 Q-Chem Parser Module
 
 Parses raw Q-Chem output text content using regular expression patterns to extract 
-numerical data and calculation metadata. Focuses solely on text parsing operations.
+numerical data and calculation metadata. Focuses solely on text parsing         data["Zero Point Energy ({})".format(zpe_unit)] = zpe_value
+
+    # Note: SMD CDS energy is not extracted for OPT files
+    # CDS is only needed for SP energy calculations
+
+    # Calculate derived values using consistent logicns.
 """
 import re
 import logging
@@ -25,7 +30,13 @@ PATTERNS = {
     "qrrho_total_enthalpy": re.compile(r"QRRHO-Total Enthalpy:\s+([-+]?\d+\.\d+)\s+([A-Za-z][A-Za-z0-9./\-]*)", re.MULTILINE),
     "total_enthalpy_fallback": re.compile(r"Total Enthalpy:\s+([-+]?\d+\.\d+)\s+([A-Za-z][A-Za-z0-9./\-]*)", re.MULTILINE),
     "qrrho_total_entropy": re.compile(r"QRRHO-Total Entropy:\s+([-+]?\d+\.\d+)\s+([A-Za-z][A-Za-z0-9./\-]*)", re.MULTILINE),
-    "total_entropy_fallback": re.compile(r"Total Entropy:\s+([-+]?\d+\.\d+)\s+([A-Za-z][A-Za-z0-9./\-]*)", re.MULTILINE)
+    "total_entropy_fallback": re.compile(r"Total Entropy:\s+([-+]?\d+\.\d+)\s+([A-Za-z][A-Za-z0-9./\-]*)", re.MULTILINE),
+    # SMD CDS energy patterns
+    "smd_g_enp": re.compile(r"\(3\)\s+G-ENP\(liq\) elect-nuc-pol free energy of system\s+([-+]?\d+\.\d+)\s+a\.u\.", re.MULTILINE),
+    "smd_g_s": re.compile(r"\(6\)\s+G-S\(liq\) free energy of system\s+([-+]?\d+\.\d+)\s+a\.u\.", re.MULTILINE),
+    "smd_cds_kcal": re.compile(r"\(4\)\s+G-CDS\(liq\) cavity-dispersion-solvent structure\s+([-+]?\d+\.\d+)\s+kcal/mol", re.MULTILINE),
+    "smd_cds_summary": re.compile(r"G_CDS\s+=\s+([-+]?\d+\.\d+)\s+kcal/mol", re.MULTILINE),
+    "smd_cds_sp_total": re.compile(r"Total:\s+([-+]?\d+\.\d+)\s*\n\s*-+", re.MULTILINE)
 }
 
 
@@ -176,6 +187,11 @@ def parse_thermodynamic_data(content: str) -> Dict[str, Any]:
         zpe_unit = zpe_match.group(2)
         data[f"Zero Point Energy ({zpe_unit})"] = zpe_value
 
+    # Extract SMD CDS energy if present
+    cds_data = parse_smd_cds_energy(content)
+    if cds_data:
+        data.update(cds_data)
+
     # Calculate derived values using consistent logic
     _calculate_derived_values(data)
 
@@ -192,26 +208,120 @@ def _calculate_derived_values(data: Dict[str, Any]) -> None:
     Args:
         data: Dictionary containing parsed data to modify
     """
+    # Use CDS energy for calculations if available (SMD solvent calculations)
+    base_energy_key = "CDS Energy (kcal/mol)" if "CDS Energy (kcal/mol)" in data else "E (kcal/mol)"
+    
     # Calculate H (kcal/mol)
-    if "E (kcal/mol)" in data and "Total Enthalpy Corr. (kcal/mol)" in data:
-        data["H (kcal/mol)"] = data["E (kcal/mol)"] + data["Total Enthalpy Corr. (kcal/mol)"]
+    if base_energy_key in data and "Total Enthalpy Corr. (kcal/mol)" in data:
+        data["H (kcal/mol)"] = data[base_energy_key] + data["Total Enthalpy Corr. (kcal/mol)"]
 
     # Calculate G (kcal/mol)
     if all(key in data for key in ["H (kcal/mol)", "Temperature (K)", "Total Entropy Corr. (kcal/mol.K)"]):
         data["G (kcal/mol)"] = data["H (kcal/mol)"] - data["Temperature (K)"] * data["Total Entropy Corr. (kcal/mol.K)"]
 
 
-def parse_sp_thermodynamic_data(content: str) -> Optional[Dict[str, Any]]:
+def parse_smd_cds_energy(opt_content: str = None, sp_content: str = None) -> Optional[Dict[str, Any]]:
+    """
+    Extract SMD CDS energy with cross-file validation for SP calculations.
+    
+    For SP energy calculations, validates CDS using three sources:
+    1. OPT file: G-S minus G-ENP (hartree) - primary, most accurate
+    2. OPT file: Summary G_CDS (kcal/mol) - validation to 4 decimal places  
+    3. SP file: SP total CDS (kcal/mol) - validation to 3 decimal places
+    
+    Args:
+        opt_content: Content from OPT output file (for primary CDS and validation)
+        sp_content: Content from SP output file (for validation)
+    
+    Returns:
+        Dictionary with validated CDS energy in both hartree and kcal/mol or None.
+    """
+    primary_value = None
+    primary_source = None
+    validation_info = {}
+    
+    # Extract from OPT file (primary + validation 1)
+    if opt_content:
+        g_s_matches = PATTERNS["smd_g_s"].findall(opt_content)
+        g_enp_matches = PATTERNS["smd_g_enp"].findall(opt_content)
+        summary_matches = PATTERNS["smd_cds_summary"].findall(opt_content)
+        
+        # Primary method: Calculate from components (OPT file)
+        if g_s_matches and g_enp_matches:
+            g_s_final = float(g_s_matches[-1])  # Last occurrence
+            g_enp_final = float(g_enp_matches[-1])
+            cds_hartree = g_s_final - g_enp_final
+            primary_value = convert_energy_unit(cds_hartree, "Ha", "kcal/mol")
+            primary_source = "opt_calculated_from_components"
+            
+            # Validation 1: Against OPT summary (4 decimal tolerance)
+            if summary_matches:
+                summary_val = float(summary_matches[-1])
+                validation_info["opt_summary_match"] = abs(primary_value - summary_val) <= 0.0001
+                validation_info["opt_summary_diff"] = abs(primary_value - summary_val)
+                if not validation_info["opt_summary_match"]:
+                    logging.warning(f"CDS validation failed (OPT 4dp): hartree={primary_value:.4f}, opt_summary={summary_val:.4f} kcal/mol")
+        
+        # Fallback to OPT summary if components not available
+        elif summary_matches:
+            primary_value = float(summary_matches[-1])
+            primary_source = "opt_summary_value"
+    
+    # Validation 2: Against SP file total (3 decimal tolerance)
+    if sp_content and primary_value is not None:
+        sp_total_matches = PATTERNS["smd_cds_sp_total"].findall(sp_content)
+        if sp_total_matches:
+            sp_val = float(sp_total_matches[-1])
+            validation_info["sp_total_match"] = abs(primary_value - sp_val) <= 0.001
+            validation_info["sp_total_diff"] = abs(primary_value - sp_val)
+            if not validation_info["sp_total_match"]:
+                logging.warning(f"CDS validation failed (SP 3dp): hartree={primary_value:.3f}, sp_total={sp_val:.3f} kcal/mol")
+    
+    if primary_value is None:
+        return None
+    
+    # Return consolidated result with OPT-derived CDS for SP calculations
+    result = {
+        "G_CDS (Ha)": convert_energy_unit(primary_value, "kcal/mol", "Ha"),
+        "G_CDS (kcal/mol)": primary_value,
+        "G_CDS_Source": primary_source
+    }
+    result.update(validation_info)
+    return result
+
+
+def parse_sp_thermodynamic_data(sp_content: str, opt_content: str = None) -> Optional[Dict[str, Any]]:
     """
     Parse thermodynamic data from SP (Single Point) Q-Chem output files.
     SP files have different patterns than OPT files.
     
     Args:
-        content: Raw text content of the SP output file
+        sp_content: Raw text content of the SP output file
+        opt_content: Optional OPT file content for CDS validation
         
     Returns:
         Dictionary containing parsed SP data or None if parsing fails
     """
-    # TODO: Implement SP-specific parsing patterns
-    # Will use similar pattern-based approach as OPT parser
-    pass
+    data = {}
+    
+    # Extract basic energy (same pattern as OPT)
+    energy_value, energy_unit, energy_fallback = get_value_with_fallback(
+        sp_content, 
+        PATTERNS["final_energy"],
+        PATTERNS["final_energy_fallback"],
+        default_unit="Ha"
+    )
+    
+    if energy_value is not None:
+        data[f"SP_E ({energy_unit})"] = energy_value
+        data["SP_E (kcal/mol)"] = convert_energy_unit(energy_value, energy_unit, "kcal/mol")
+        data["SP_Fallback Used"] = "Yes" if energy_fallback else "No"
+    else:
+        return None  # Can't proceed without energy
+    
+    # Extract SMD CDS energy with cross-file validation
+    cds_data = parse_smd_cds_energy(opt_content=opt_content, sp_content=sp_content)
+    if cds_data:
+        data.update(cds_data)
+    
+    return data
