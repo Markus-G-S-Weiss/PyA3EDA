@@ -511,6 +511,7 @@ def create_file_metadata(method: dict, bs: dict, file_mode: str, category: str,
             "Calc_Type": calc_type,
             "Catalyst": catalyst_name,
             "Mode": file_mode,
+            "eda2": method.get("eda2", "0"),  # Add EDA2 parameter for consistency
             "Path": str(file_path)
         }
     else:  # sp
@@ -545,6 +546,7 @@ def create_file_metadata(method: dict, bs: dict, file_mode: str, category: str,
             "Calc_Type": calc_type,
             "Catalyst": catalyst_name,
             "Mode": file_mode,
+            "eda2": method.get("eda2", "0"),  # Add EDA2 parameter for automatic detection
             "Path": str(file_path)
         }
 
