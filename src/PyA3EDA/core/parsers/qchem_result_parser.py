@@ -1,19 +1,14 @@
 """
 Q-Chem Parser Module
 
-Parses raw Q-Chem output text content using regular expression patterns to extract 
-numerical data and calculation metadata. Focuses solely on text parsing         data["Zero Point Energy ({})".format(zpe_unit)] = zpe_value
-
-    # Note: SMD CDS energy is not extracted for OPT files
-    # CDS is only needed for SP energy calculations
-
-    # Calculate derived values using consistent logicns.
+Pure parsing functions that extract numerical data from Q-Chem output text content.
+Each function focuses on a single parsing task without business logic or cross-file operations.
+Returns raw parsed values that can be further processed by extraction logic.
 """
 import re
 import logging
-from typing import Optional, Tuple, Dict, Any, Pattern
+from typing import Optional, Tuple, Dict, Any, Pattern, List
 
-from PyA3EDA.core.constants import Constants
 from PyA3EDA.core.utils.unit_converter import convert_energy_unit
 
 
@@ -36,292 +31,202 @@ PATTERNS = {
     "smd_g_s": re.compile(r"\(6\)\s+G-S\(liq\) free energy of system\s+([-+]?\d+\.\d+)\s+a\.u\.", re.MULTILINE),
     "smd_cds_kcal": re.compile(r"\(4\)\s+G-CDS\(liq\) cavity-dispersion-solvent structure\s+([-+]?\d+\.\d+)\s+kcal/mol", re.MULTILINE),
     "smd_cds_summary": re.compile(r"G_CDS\s+=\s+([-+]?\d+\.\d+)\s+kcal/mol", re.MULTILINE),
-    "smd_cds_sp_total": re.compile(r"Total:\s+([-+]?\d+\.\d+)\s*\n\s*-+", re.MULTILINE)
+    "smd_cds_sp_total": re.compile(r"Total:\s+([-+]?\d+\.\d+)\s*\n\s*-+", re.MULTILINE),
+    # EDA-specific patterns
+    "eda_polarized_energy": re.compile(r"Energy prior to optimization \(guess energy\)\s*=\s*([-+]?\d+\.\d+)", re.MULTILINE),
+    "eda_convergence_energy": re.compile(r"^\s*\d+\s+([-+]?\d+\.\d+)\s+[\d.e-]+\s+\d+\s+Convergence criterion met", re.MULTILINE),
+    "bsse_energy": re.compile(r"BSSE \(kJ/mol\)\s*=\s*([-+]?\d+\.\d+)", re.MULTILINE)
 }
 
 
-def get_value_with_fallback(content: str, primary_pattern: Pattern, fallback_pattern: Pattern, 
-                           default_unit: str = None) -> Tuple[Optional[float], Optional[str], bool]:
+def extract_with_pattern(content: str, primary_pattern: Pattern, fallback_pattern: Pattern = None, 
+                        field_mapping: Dict[str, str] = None, default_unit: str = None) -> Tuple[Any, bool]:
     """
-    Extract value with unit, falling back to secondary pattern if primary fails.
+    Universal pattern extraction function that handles all parsing scenarios.
+    Always uses findall() and takes the last match for consistency.
     
     Args:
         content: Text content to search
         primary_pattern: Primary regex pattern to try first
-        fallback_pattern: Fallback regex pattern if primary fails
+        fallback_pattern: Optional fallback regex pattern if primary fails
+        field_mapping: Optional dictionary mapping group indices to field names
         default_unit: Default unit if pattern doesn't capture unit
         
     Returns:
-        Tuple of (value, unit, fallback_used)
+        Tuple of (result, fallback_used) where result format depends on parameters:
+        - Single value: float
+        - Value with unit: (float, str)  
+        - Multiple fields: Dict[str, Any]
+        - Nothing found: None
     """
-    primary_match = primary_pattern.search(content)
-    if primary_match:
-        unit = primary_match.group(2) if primary_match.lastindex >= 2 else default_unit
-        return float(primary_match.group(1)), unit, False
-    
-    fallback_match = fallback_pattern.search(content)
-    if fallback_match:
-        unit = fallback_match.group(2) if fallback_match.lastindex >= 2 else default_unit
-        return float(fallback_match.group(1)), unit, True
-    
-    return None, None, False
-
-
-def get_single_value(content: str, pattern: Pattern, field_mapping: Dict[str, str] = None) -> Dict[str, Any]:
-    """
-    Extract single value from pattern and format according to field mapping.
-    
-    Args:
-        content: Text content to search
-        pattern: Regex pattern to match
-        field_mapping: Dictionary mapping group indices to field names
-        
-    Returns:
-        Dictionary with extracted values
-    """
-    match = pattern.search(content)
-    if not match:
-        return {}
-    
-    if not field_mapping:
-        # Default single value extraction
-        return {"value": float(match.group(1))}
-    
-    result = {}
-    for group_idx, field_name in field_mapping.items():
-        if match.lastindex >= group_idx:
-            value = match.group(group_idx)
-            # Try to convert to appropriate type
-            try:
-                if '.' in value:
-                    result[field_name] = float(value)
-                else:
-                    result[field_name] = int(value)
-            except ValueError:
-                result[field_name] = value
-    
-    return result
-
-
-def parse_thermodynamic_data(content: str) -> Dict[str, Any]:
-    """
-    Parse all thermodynamic data from Q-Chem output content.
-    
-    Args:
-        content: Text content of Q-Chem output file
-        
-    Returns:
-        Dictionary of parsed thermodynamic values with standardized units
-    """
-    data = {}
     fallback_used = False
     
-    # Energy extraction - critical field
-    energy_value, energy_unit, energy_fallback = get_value_with_fallback(
-        content, 
-        PATTERNS["final_energy"],
-        PATTERNS["final_energy_fallback"],
-        default_unit="Ha"
-    )
+    # Try primary pattern first
+    matches = primary_pattern.findall(content)
     
-    if energy_value is not None:
-        data[f"E ({energy_unit})"] = energy_value
-        data["E (kcal/mol)"] = convert_energy_unit(energy_value, energy_unit, "kcal/mol")
-        if energy_fallback:
-            fallback_used = True
-    else:
-        return None  # Can't proceed without energy
-
-    # Enthalpy extraction with fallback
-    enthalpy_value, enthalpy_unit, enthalpy_fallback = get_value_with_fallback(
-        content, 
-        PATTERNS["qrrho_total_enthalpy"],
-        PATTERNS["total_enthalpy_fallback"]
-    )
+    # Try fallback pattern if primary failed and fallback provided
+    if not matches and fallback_pattern:
+        matches = fallback_pattern.findall(content)
+        fallback_used = True
     
-    if enthalpy_value is not None:
-        enthalpy_converted = convert_energy_unit(enthalpy_value, enthalpy_unit, "kcal/mol")
-        data["Total Enthalpy Corr. (kcal/mol)"] = enthalpy_converted
-        if enthalpy_fallback:
-            fallback_used = True
-
-    # Entropy extraction with fallback
-    entropy_value, entropy_unit, entropy_fallback = get_value_with_fallback(
-        content,
-        PATTERNS["qrrho_total_entropy"],
-        PATTERNS["total_entropy_fallback"]
-    )
+    if not matches:
+        return None, fallback_used
     
-    if entropy_value is not None:
-        entropy_converted = convert_energy_unit(entropy_value, entropy_unit, "kcal/mol.K")
-        data["Total Entropy Corr. (kcal/mol.K)"] = entropy_converted
-        if entropy_fallback:
-            fallback_used = True
-
-    # Optimization status
-    opt_data = get_single_value(content, PATTERNS["optimization_status"], {1: "status"})
-    if opt_data:
-        data["Optimization Status"] = opt_data["status"]
-
-    # Temperature and pressure
-    thermo_data = get_single_value(content, PATTERNS["thermodynamics"], {1: "temperature", 2: "pressure"})
-    if thermo_data:
-        data["Temperature (K)"] = thermo_data["temperature"]
-        data["Pressure (atm)"] = thermo_data["pressure"]
-
-    # QRRHO parameters
-    qrrho_data = get_single_value(content, PATTERNS["qrrho_parameters"], {1: "alpha", 2: "omega"})
-    if qrrho_data:
-        data["Alpha"] = qrrho_data["alpha"]
-        data["Omega (cm^-1)"] = qrrho_data["omega"]
-
-    # Imaginary frequencies
-    freq_data = get_single_value(content, PATTERNS["imaginary_frequencies"], {1: "count"})
-    if freq_data:
-        data["Imaginary Frequencies"] = freq_data["count"]
-
-    # Zero point energy
-    zpe_match = PATTERNS["zero_point_energy"].search(content)
-    if zpe_match:
-        zpe_value = float(zpe_match.group(1))
-        zpe_unit = zpe_match.group(2)
-        data[f"Zero Point Energy ({zpe_unit})"] = zpe_value
-
-    # Extract SMD CDS energy if present
-    cds_data = parse_smd_cds_energy(content)
-    if cds_data:
-        data.update(cds_data)
-
-    # Calculate derived values using consistent logic
-    _calculate_derived_values(data)
-
-    # Add fallback flag
-    data["Fallback Used"] = "Yes" if fallback_used else "No"
+    # Get the last match (most recent/final occurrence)
+    last_match = matches[-1]
     
-    return data
+    # Handle field mapping (for multi-group patterns)
+    if field_mapping:
+        result = {}
+        if isinstance(last_match, tuple):
+            for group_idx, field_name in field_mapping.items():
+                if group_idx <= len(last_match):
+                    value = last_match[group_idx - 1]  # findall is 0-indexed, field_mapping is 1-indexed
+                    try:
+                        if '.' in str(value):
+                            result[field_name] = float(value)
+                        else:
+                            result[field_name] = int(value)
+                    except (ValueError, TypeError):
+                        result[field_name] = value
+        else:
+            # Single value with field mapping
+            if 1 in field_mapping:
+                try:
+                    result[field_mapping[1]] = float(last_match) if '.' in str(last_match) else int(last_match)
+                except (ValueError, TypeError):
+                    result[field_mapping[1]] = last_match
+        return result, fallback_used
+    
+    # Handle value with unit (tuple result)
+    if isinstance(last_match, tuple):
+        value = float(last_match[0])
+        unit = last_match[1] if len(last_match) > 1 and last_match[1] else default_unit
+        return (value, unit), fallback_used
+    
+    # Handle single value
+    return float(last_match), fallback_used
 
 
-def _calculate_derived_values(data: Dict[str, Any]) -> None:
+# PURE PARSING FUNCTIONS - Each function parses one specific data type
+
+
+def parse_energy(content: str) -> Optional[Dict[str, Any]]:
+    """Parse final energy from Q-Chem output content."""
+    result, fallback_used = extract_with_pattern(
+        content, PATTERNS["final_energy"], PATTERNS["final_energy_fallback"], default_unit="Ha")
+    
+    if result is not None:
+        energy_value, energy_unit = result
+        return {
+            f"E ({energy_unit})": energy_value,
+            "E (kcal/mol)": convert_energy_unit(energy_value, energy_unit, "kcal/mol"),
+            "energy_fallback_used": fallback_used
+        }
+    return None
+
+
+def parse_enthalpy(content: str) -> Optional[Dict[str, Any]]:
+    """Parse enthalpy correction from Q-Chem output content."""
+    result, fallback_used = extract_with_pattern(
+        content, PATTERNS["qrrho_total_enthalpy"], PATTERNS["total_enthalpy_fallback"])
+    
+    if result is not None:
+        enthalpy_value, enthalpy_unit = result
+        return {
+            "Total Enthalpy Corr. (kcal/mol)": convert_energy_unit(enthalpy_value, enthalpy_unit, "kcal/mol"),
+            "enthalpy_fallback_used": fallback_used
+        }
+    return None
+
+
+def parse_entropy(content: str) -> Optional[Dict[str, Any]]:
+    """Parse entropy correction from Q-Chem output content."""
+    result, fallback_used = extract_with_pattern(
+        content, PATTERNS["qrrho_total_entropy"], PATTERNS["total_entropy_fallback"])
+    
+    if result is not None:
+        entropy_value, entropy_unit = result
+        return {
+            "Total Entropy Corr. (kcal/mol.K)": convert_energy_unit(entropy_value, entropy_unit, "kcal/mol.K"),
+            "entropy_fallback_used": fallback_used
+        }
+    return None
+
+
+def parse_optimization_status(content: str) -> Optional[Dict[str, Any]]:
+    """Parse optimization status from Q-Chem output content."""
+    result, _ = extract_with_pattern(content, PATTERNS["optimization_status"], field_mapping={1: "status"})
+    return {"Optimization Status": result["status"]} if result else None
+
+
+def parse_thermodynamic_conditions(content: str) -> Optional[Dict[str, Any]]:
+    """Parse temperature and pressure from Q-Chem output content."""
+    result, _ = extract_with_pattern(content, PATTERNS["thermodynamics"], field_mapping={1: "temperature", 2: "pressure"})
+    return {"Temperature (K)": result["temperature"], "Pressure (atm)": result["pressure"]} if result else None
+
+
+def parse_qrrho_parameters(content: str) -> Optional[Dict[str, Any]]:
+    """Parse QRRHO parameters from Q-Chem output content."""
+    result, _ = extract_with_pattern(content, PATTERNS["qrrho_parameters"], field_mapping={1: "alpha", 2: "omega"})
+    return {"Alpha": result["alpha"], "Omega (cm^-1)": result["omega"]} if result else None
+
+
+def parse_imaginary_frequencies(content: str) -> Optional[Dict[str, Any]]:
+    """Parse imaginary frequencies count from Q-Chem output content."""
+    result, _ = extract_with_pattern(content, PATTERNS["imaginary_frequencies"], field_mapping={1: "count"})
+    return {"Imaginary Frequencies": result["count"]} if result else None
+
+
+def parse_zero_point_energy(content: str) -> Optional[Dict[str, Any]]:
+    """Parse zero point energy from Q-Chem output content."""
+    result, _ = extract_with_pattern(content, PATTERNS["zero_point_energy"], default_unit="kcal/mol")
+    
+    if result is not None:
+        zpe_value, zpe_unit = result
+        return {f"Zero Point Energy ({zpe_unit})": zpe_value}
+    return None
+
+
+def parse_smd_cds_raw_values(content: str) -> Optional[Dict[str, Any]]:
     """
-    Calculate derived thermodynamic values (H and G) in place.
-    
-    Args:
-        data: Dictionary containing parsed data to modify
+    Parse raw SMD CDS energy values from Q-Chem output content.
+    Returns only the final/last values since intermediate values are not needed.
+    Does NOT perform cross-file validation or complex logic - just extracts raw values.
     """
-    # Use CDS energy for calculations if available (SMD solvent calculations)
-    base_energy_key = "CDS Energy (kcal/mol)" if "CDS Energy (kcal/mol)" in data else "E (kcal/mol)"
+    result = {}
     
-    # Calculate H (kcal/mol)
-    if base_energy_key in data and "Total Enthalpy Corr. (kcal/mol)" in data:
-        data["H (kcal/mol)"] = data[base_energy_key] + data["Total Enthalpy Corr. (kcal/mol)"]
-
-    # Calculate G (kcal/mol)
-    if all(key in data for key in ["H (kcal/mol)", "Temperature (K)", "Total Entropy Corr. (kcal/mol.K)"]):
-        data["G (kcal/mol)"] = data["H (kcal/mol)"] - data["Temperature (K)"] * data["Total Entropy Corr. (kcal/mol.K)"]
-
-
-def parse_smd_cds_energy(opt_content: str = None, sp_content: str = None) -> Optional[Dict[str, Any]]:
-    """
-    Extract SMD CDS energy with cross-file validation for SP calculations.
+    # Define value extractors - pattern name maps to result key
+    extractors = [
+        ("smd_g_s", "g_s_final"),
+        ("smd_g_enp", "g_enp_final"),
+        ("smd_cds_kcal", "cds_kcal_final"),
+        ("smd_cds_summary", "cds_summary_final"),
+        ("smd_cds_sp_total", "cds_sp_total_final")
+    ]
     
-    For SP energy calculations, validates CDS using three sources:
-    1. OPT file: G-S minus G-ENP (hartree) - primary, most accurate
-    2. OPT file: Summary G_CDS (kcal/mol) - validation to 4 decimal places  
-    3. SP file: SP total CDS (kcal/mol) - validation to 3 decimal places
+    # Extract each value using the same pattern
+    for pattern_name, result_key in extractors:
+        value, _ = extract_with_pattern(content, PATTERNS[pattern_name])
+        if value is not None:
+            result[result_key] = value
     
-    Args:
-        opt_content: Content from OPT output file (for primary CDS and validation)
-        sp_content: Content from SP output file (for validation)
-    
-    Returns:
-        Dictionary with validated CDS energy in both hartree and kcal/mol or None.
-    """
-    primary_value = None
-    primary_source = None
-    validation_info = {}
-    
-    # Extract from OPT file (primary + validation 1)
-    if opt_content:
-        g_s_matches = PATTERNS["smd_g_s"].findall(opt_content)
-        g_enp_matches = PATTERNS["smd_g_enp"].findall(opt_content)
-        summary_matches = PATTERNS["smd_cds_summary"].findall(opt_content)
-        
-        # Primary method: Calculate from components (OPT file)
-        if g_s_matches and g_enp_matches:
-            g_s_final = float(g_s_matches[-1])  # Last occurrence
-            g_enp_final = float(g_enp_matches[-1])
-            cds_hartree = g_s_final - g_enp_final
-            primary_value = convert_energy_unit(cds_hartree, "Ha", "kcal/mol")
-            primary_source = "opt_calculated_from_components"
-            
-            # Validation 1: Against OPT summary (4 decimal tolerance)
-            if summary_matches:
-                summary_val = float(summary_matches[-1])
-                validation_info["opt_summary_match"] = abs(primary_value - summary_val) <= 0.0001
-                validation_info["opt_summary_diff"] = abs(primary_value - summary_val)
-                if not validation_info["opt_summary_match"]:
-                    logging.warning(f"CDS validation failed (OPT 4dp): hartree={primary_value:.4f}, opt_summary={summary_val:.4f} kcal/mol")
-        
-        # Fallback to OPT summary if components not available
-        elif summary_matches:
-            primary_value = float(summary_matches[-1])
-            primary_source = "opt_summary_value"
-    
-    # Validation 2: Against SP file total (3 decimal tolerance)
-    if sp_content and primary_value is not None:
-        sp_total_matches = PATTERNS["smd_cds_sp_total"].findall(sp_content)
-        if sp_total_matches:
-            sp_val = float(sp_total_matches[-1])
-            validation_info["sp_total_match"] = abs(primary_value - sp_val) <= 0.001
-            validation_info["sp_total_diff"] = abs(primary_value - sp_val)
-            if not validation_info["sp_total_match"]:
-                logging.warning(f"CDS validation failed (SP 3dp): hartree={primary_value:.3f}, sp_total={sp_val:.3f} kcal/mol")
-    
-    if primary_value is None:
-        return None
-    
-    # Return consolidated result with OPT-derived CDS for SP calculations
-    result = {
-        "G_CDS (Ha)": convert_energy_unit(primary_value, "kcal/mol", "Ha"),
-        "G_CDS (kcal/mol)": primary_value,
-        "G_CDS_Source": primary_source
-    }
-    result.update(validation_info)
-    return result
+    return result if result else None
 
 
-def parse_sp_thermodynamic_data(sp_content: str, opt_content: str = None) -> Optional[Dict[str, Any]]:
-    """
-    Parse thermodynamic data from SP (Single Point) Q-Chem output files.
-    SP files have different patterns than OPT files.
-    
-    Args:
-        sp_content: Raw text content of the SP output file
-        opt_content: Optional OPT file content for CDS validation
-        
-    Returns:
-        Dictionary containing parsed SP data or None if parsing fails
-    """
-    data = {}
-    
-    # Extract basic energy (same pattern as OPT)
-    energy_value, energy_unit, energy_fallback = get_value_with_fallback(
-        sp_content, 
-        PATTERNS["final_energy"],
-        PATTERNS["final_energy_fallback"],
-        default_unit="Ha"
-    )
-    
-    if energy_value is not None:
-        data[f"SP_E ({energy_unit})"] = energy_value
-        data["SP_E (kcal/mol)"] = convert_energy_unit(energy_value, energy_unit, "kcal/mol")
-        data["SP_Fallback Used"] = "Yes" if energy_fallback else "No"
-    else:
-        return None  # Can't proceed without energy
-    
-    # Extract SMD CDS energy with cross-file validation
-    cds_data = parse_smd_cds_energy(opt_content=opt_content, sp_content=sp_content)
-    if cds_data:
-        data.update(cds_data)
-    
-    return data
+def parse_eda_polarized_energy(content: str) -> Optional[Dict[str, Any]]:
+    """Parse polarized energy from EDA SP calculations (frz/pol types)."""
+    result, _ = extract_with_pattern(content, PATTERNS["eda_polarized_energy"], field_mapping={1: "polarized_energy"})
+    return {"polarized_energy": result["polarized_energy"]} if result else None
+
+
+def parse_eda_convergence_energy(content: str) -> Optional[Dict[str, Any]]:
+    """Parse convergence criterion energy from EDA SP calculations (full type)."""
+    result, _ = extract_with_pattern(content, PATTERNS["eda_convergence_energy"], field_mapping={1: "convergence_energy"})
+    return {"convergence_energy": result["convergence_energy"]} if result else None
+
+
+def parse_bsse_energy(content: str) -> Optional[Dict[str, Any]]:
+    """Parse BSSE energy from EDA SP calculations (full type correction)."""
+    result, _ = extract_with_pattern(content, PATTERNS["bsse_energy"], field_mapping={1: "bsse_energy"})
+    return {"bsse_energy": result["bsse_energy"]} if result else None
