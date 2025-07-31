@@ -101,7 +101,7 @@ def get_status_for_file(input_file: Path, metadata: dict = None) -> Tuple[str, s
         if validation_failed:
             return "VALIDATION", f"Conv: {convergence_type}, Imag: {imag_count}"
         else:
-            return status, f"{details} (Conv: {convergence_type}, Imag: {imag_count})"
+            return status, details
     
     return status, details
 
