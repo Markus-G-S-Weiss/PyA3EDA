@@ -31,7 +31,7 @@ def _build_fragmented_section(overall_charge: int, overall_mult: int,
 
 def _get_coordinates(template_data: dict, output_text: str = None, identifier: str = None) -> list[str]:
     """Get coordinates from either template or output file with fallback."""
-    if output_text:
+    if output_text and identifier:
         # SP mode - get coordinates from output file
         output_data = parse_qchem_output_xyz(output_text, identifier)
         if output_data:
@@ -39,6 +39,8 @@ def _get_coordinates(template_data: dict, output_text: str = None, identifier: s
         else:
             # Fall back to template if output parsing fails
             logging.warning(f"Failed to parse output for '{identifier}', falling back to template")
+    elif output_text and not identifier:
+        logging.warning("Cannot parse output text without identifier, using template coordinates")
     
     # Return template coordinates
     return template_data['atoms']
