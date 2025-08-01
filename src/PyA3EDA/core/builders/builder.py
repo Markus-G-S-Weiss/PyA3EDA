@@ -328,16 +328,6 @@ def build_and_write_input_file(system_dir: Path,
             category, branch, species, calc_type, catalyst_name, mode="opt"
         )
         
-        if sp_strategy == "smart":
-            # Check if optimization was successful
-            from PyA3EDA.core.status.status_checker import get_status_for_file
-            
-            status, details = get_status_for_file(opt_input_path)
-            
-            if status != "SUCCESSFUL":
-                logging.info(f"Skipping SP file generation for {species} - OPT status is {status}: {details}")
-                return
-                
         opt_output_path = opt_input_path.with_suffix(".out")
     else:
         opt_params = None
@@ -352,9 +342,22 @@ def build_and_write_input_file(system_dir: Path,
         category, branch, species, calc_type, catalyst_name, mode, opt_params
     )
     
+    from PyA3EDA.core.status.status_checker import should_process_file
+
+    # Check SP strategy after building SP file path so we can log the correct file
+    if mode == "sp" and sp_strategy == "smart":
+        # Create minimal metadata for validation (only need Branch for TS validation)
+        opt_metadata = {"Mode": "opt", "Branch": branch}
+        # Check if OPT file should be processed as "SUCCESSFUL" (includes validation)        
+        should_generate, reason = should_process_file(opt_input_path, "SUCCESSFUL", opt_metadata)
+        
+        if not should_generate:
+            logging.info(f"Skipping SP file ({reason}): {file_path.relative_to(system_dir)}")
+            return
+
     # Check if file exists and determine if we should overwrite
     if file_path.exists():
-        from PyA3EDA.core.status.status_checker import should_process_file
+        # Check if we should overwrite based on the provided criteria
         should_write, reason = should_process_file(file_path, overwrite)
         if not should_write:
             logging.info(f"Skipping file ({reason}): {file_path.relative_to(system_dir)}")
