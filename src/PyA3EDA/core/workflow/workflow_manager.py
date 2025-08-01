@@ -23,8 +23,9 @@ class WorkflowManager:
         # Extract arguments with safe defaults
         overwrite = getattr(self.args, 'overwrite', None) if self.args else None
         sp_strategy = getattr(self.args, 'sp_strategy', 'smart') if self.args else 'smart'
+        include_validation = getattr(self.args, 'validation', False) if self.args else False
         
-        builder.generate_all_inputs(self.config_manager, self.system_dir, overwrite, sp_strategy)
+        builder.generate_all_inputs(self.config_manager, self.system_dir, overwrite, sp_strategy, include_validation)
 
     def run_calculations(self) -> None:
         """
@@ -34,11 +35,13 @@ class WorkflowManager:
         
         # Extract run criteria from args with safe defaults
         run_criteria = getattr(self.args, 'run', None) if self.args else None
+        include_validation = getattr(self.args, 'validation', False) if self.args else False
         
         run_all_calculations(
             self.config_manager.processed_config,
             self.system_dir,
-            run_criteria
+            run_criteria,
+            include_validation
         )
 
     def check_status(self) -> None:
@@ -56,6 +59,7 @@ class WorkflowManager:
         from PyA3EDA.core.extractors.data_extractor_clean import extract_all_data
         
         criteria = getattr(self.args, 'extract', None) if self.args else "SUCCESSFUL"
+        include_validation = getattr(self.args, 'validation', False) if self.args else False
         
         # Single function call - extractor handles everything
-        extract_all_data(self.config_manager, self.system_dir, criteria)
+        extract_all_data(self.config_manager, self.system_dir, criteria, include_validation)

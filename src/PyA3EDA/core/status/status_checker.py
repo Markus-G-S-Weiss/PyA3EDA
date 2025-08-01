@@ -60,61 +60,57 @@ def get_status_for_file(input_file: Path, metadata: dict = None) -> Tuple[str, s
     if (status.lower() == "successful" and metadata and metadata.get("Mode") == "opt" and content):
         # Check optimization status and imaginary frequencies
         opt_status = parse_optimization_status(content)
-        imag_freq = parse_imaginary_frequencies(content)
+        imag_freq_parsed = parse_imaginary_frequencies(content)
         
         # Skip enhanced validation if no patterns found
-        if opt_status is None and imag_freq is None:
+        if opt_status is None and imag_freq_parsed is None:
             return status, details
         
         # Get convergence type
         convergence_type = "unknown"
-        if opt_status:
-            opt_status_text = opt_status.get("Optimization Status", "")
-            if "TRANSITION STATE" in opt_status_text:
-                convergence_type = "ts"
-            elif "OPTIMIZATION CONVERGED" in opt_status_text:
-                convergence_type = "opt"
+        opt_status_text = opt_status.get("Optimization Status", "")
+        if "TRANSITION STATE CONVERGED" in opt_status_text:
+            convergence_type = "ts"
+        elif "OPTIMIZATION CONVERGED" in opt_status_text:
+            convergence_type = "opt"
         
-        # Get imaginary frequency count
-        imag_count = 0
-        if imag_freq is not None:
-            imag_count = int(imag_freq.get("Imaginary Frequencies", 0))
+        # Get imaginary frequency count directly as int
+        imag_freq = int(imag_freq_parsed.get("Imaginary Frequencies", 0))
         
         # Simple validation logic
         branch = metadata.get("Branch", "").lower()
-        is_ts_expected = branch == "ts"
+        ts_expected = branch == "ts"
         
         # Check if validation fails
         validation_failed = False
-        if is_ts_expected:
-            # TS branch: should have 1 imaginary frequency
-            if convergence_type == "opt" and imag_count != 1:
-                validation_failed = True
-            elif convergence_type == "ts" and imag_count != 1:
+        if ts_expected:
+            # TS branch: should have 1 imaginary frequency AND convergence type should match
+            if convergence_type != "ts" or imag_freq != 1:
                 validation_failed = True
         else:
-            # Non-TS branch: should have 0 imaginary frequencies
-            if imag_count > 0:
+            # Non-TS branch: should have 0 imaginary frequencies AND should not be TS convergence
+            if convergence_type == "ts" or imag_freq > 0:
                 validation_failed = True
         
         # Return appropriate status
         if validation_failed:
-            return "VALIDATION", f"Conv: {convergence_type}, Imag: {imag_count}"
+            return "VALIDATION", f"Conv: {convergence_type}, Imag: {imag_freq if imag_freq is not None else 'unknown'}"
         else:
             return status, details
     
     return status, details
 
 
-def should_process_file(input_file: Path, criteria: str, metadata: dict = None) -> Tuple[bool, str]:
+def should_process_file(input_file: Path, criteria: str, metadata: dict = None, include_validation: bool = False) -> Tuple[bool, str]:
     """
     Determine if a file should be processed based on criteria.
-    Enhanced with OPT info display.
+    Enhanced with OPT info display and validation support.
     
     Args:
         input_file: Path to the input file
         criteria: Criteria for processing ("all", "nofile", or status name)
         metadata: Optional metadata containing calculation details
+        include_validation: Whether to include VALIDATION status files when criteria is "SUCCESSFUL"
         
     Returns:
         Tuple[bool, str]: (should_process, reason)
@@ -137,12 +133,16 @@ def should_process_file(input_file: Path, criteria: str, metadata: dict = None) 
     # Use enhanced status checking if metadata is available
     status, details = get_status_for_file(input_file, metadata)
     
-    if status.lower() == criteria.lower():
+    # Handle validation inclusion for SUCCESSFUL criteria
+    if criteria.lower() == "successful" and include_validation:
+        if status.lower() in ["successful", "validation"]:
+            return True, f"Status match (with validation): {status}"
+    elif status.lower() == criteria.lower():
         return True, f"Status match: {status}"
     
     return False, f"Status mismatch: {status} ≠ {criteria}"
 
-def group_paths_by_method_basis(path_items: List, system_dir: Path) -> Dict[str, List]:
+def group_paths_by_method_basis(path_items: List) -> Dict[str, List]:
     """
     Groups paths by method combination with proper dispersion formatting.
     Uses metadata when available for accurate grouping, falls back to path-based grouping.
@@ -269,7 +269,7 @@ def check_all_statuses(config: dict, system_dir: Path) -> None:
         logging.info("No input paths available for status checking.")
         return
 
-    groups = group_paths_by_method_basis(path_items, system_dir)
+    groups = group_paths_by_method_basis(path_items)
     overall_counts: Dict[str, int] = {}
 
     for group_key, group_items in groups.items():
