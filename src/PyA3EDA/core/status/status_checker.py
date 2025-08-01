@@ -101,16 +101,15 @@ def get_status_for_file(input_file: Path, metadata: dict = None) -> Tuple[str, s
     return status, details
 
 
-def should_process_file(input_file: Path, criteria: str, metadata: dict = None, include_validation: bool = False) -> Tuple[bool, str]:
+def should_process_file(input_file: Path, criteria: str, metadata: dict = None) -> Tuple[bool, str]:
     """
     Determine if a file should be processed based on criteria.
-    Enhanced with OPT info display and validation support.
+    Enhanced with OPT info display.
     
     Args:
         input_file: Path to the input file
         criteria: Criteria for processing ("all", "nofile", or status name)
         metadata: Optional metadata containing calculation details
-        include_validation: Whether to include VALIDATION status files when criteria is "SUCCESSFUL"
         
     Returns:
         Tuple[bool, str]: (should_process, reason)
@@ -133,11 +132,7 @@ def should_process_file(input_file: Path, criteria: str, metadata: dict = None, 
     # Use enhanced status checking if metadata is available
     status, details = get_status_for_file(input_file, metadata)
     
-    # Handle validation inclusion for SUCCESSFUL criteria
-    if criteria.lower() == "successful" and include_validation:
-        if status.lower() in ["successful", "validation"]:
-            return True, f"Status match (with validation): {status}"
-    elif status.lower() == criteria.lower():
+    if status.lower() == criteria.lower():
         return True, f"Status match: {status}"
     
     return False, f"Status mismatch: {status} ≠ {criteria}"
