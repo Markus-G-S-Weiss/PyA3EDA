@@ -1,201 +1,185 @@
 """
 Data Exporter Module
 
-Single responsibility: Take extracted data and write to various file formats.
-No data extraction - only file organization and writing.
+Pure file writers for direct CSV and XYZ export:
+- write_opt_csv: Write OPT data to CSV file
+- write_sp_csv: Write SP data to CSV file  
+- write_xyz_file: Write single XYZ coordinate file
 """
 import logging
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
-from collections import defaultdict
+from typing import Dict, List, Optional, Any
 
 from PyA3EDA.core.utils.file_utils import write_text
-from PyA3EDA.core.utils.xyz_format_utils import format_xyz_content
 
 
-def export_all_formats(extracted_data: List[Dict[str, Any]], output_dir: Path) -> Dict[str, Any]:
+def write_opt_csv(data_list: List[Dict[str, Any]], file_path: Path) -> bool:
     """
-    Export extracted data to all supported formats.
-    Single entry point for all exports.
+    Write OPT data to CSV file.
     
     Args:
-        extracted_data: List of extracted data dictionaries
-        output_dir: Output directory path
+        data_list: List of OPT data dictionaries (CSV-ready)
+        file_path: Output CSV file path
         
     Returns:
-        Dictionary containing paths to all exported files
+        True if successful, False otherwise
     """
-    if not extracted_data:
-        logging.warning("No data to export")
-        return {}
+    if not data_list:
+        logging.warning("No OPT data to write")
+        return False
+        
+    try:
+        # Create DataFrame and save directly
+        df = pd.DataFrame(data_list)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(file_path, index=False)
+        logging.info(f"Saved {len(df)} OPT rows to {file_path}")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Failed to write OPT CSV file {file_path}: {e}")
+        return False
+
+
+def write_sp_csv(data_list: List[Dict[str, Any]], file_path: Path) -> bool:
+    """
+    Write SP data to CSV file.
+    
+    Args:
+        data_list: List of SP data dictionaries (CSV-ready)
+        file_path: Output CSV file path
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if not data_list:
+        logging.warning("No SP data to write")
+        return False
+        
+    try:
+        # Create DataFrame and save directly
+        df = pd.DataFrame(data_list)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(file_path, index=False)
+        logging.info(f"Saved {len(df)} SP rows to {file_path}")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Failed to write SP CSV file {file_path}: {e}")
+        return False
+
+
+def write_xyz_files(data_list: List[Dict[str, Any]], output_dir: Path) -> Dict[str, Path]:
+    """
+    Write coordinate data to XYZ files.
+    
+    Args:
+        data_list: List of data dictionaries with coordinate information
+        output_dir: Output directory for XYZ files
+        
+    Returns:
+        Dictionary mapping file identifiers to file paths
+    """
+    results = {}
+    
+    if not data_list:
+        logging.warning("No coordinate data to write")
+        return results
         
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Export CSV files
-    csv_results = export_csv_files(extracted_data, output_dir)
-    
-    # Export XYZ files
-    xyz_results = export_xyz_files(extracted_data, output_dir)
-    
-    # Combine results
-    all_results = {
-        "csv_files": csv_results,
-        "xyz_files": xyz_results,
-        "total_csv": len(csv_results),
-        "total_xyz": len(xyz_results)
-    }
-    
-    logging.info(f"Export completed: {len(csv_results)} CSV files, {len(xyz_results)} XYZ files")
-    return all_results
-
-
-def group_data_by_method_combo(extracted_data: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Group extracted data by method combo.
-    """
-    grouped = defaultdict(list)
-    for data in extracted_data:
-        method_combo = data.get("Method_Combo", "unknown")
-        grouped[method_combo].append(data)
-    return dict(grouped)
-
-
-def export_csv_files(extracted_data: List[Dict[str, Any]], output_dir: Path) -> Dict[str, Path]:
-    """
-    Export CSV files using metadata from builder.
-    No data extraction - only file writing.
-    """
-    # Use shared grouping logic
-    grouped = group_data_by_method_combo(extracted_data)
-    results = {}
-    
-    for method_combo, data_list in grouped.items():
-        # Use method combo from builder (already clean)
-        method_dir = output_dir / method_combo
-        
-        # Further group by mode for CSV organization
-        mode_groups = defaultdict(list)
-        for data in data_list:
-            mode = data.get("Mode", "unknown")
-            mode_groups[mode].append(data)
-        
-        for mode, mode_data_list in mode_groups.items():
-            if mode == "sp":
-                # Handle SP grouping
-                sp_groups = defaultdict(list)
-                for data in mode_data_list:
-                    sp_combo = data.get("SP_Method_Combo", "unknown_sp")
-                    sp_groups[sp_combo].append(data)
-                
-                for sp_combo, sp_data in sp_groups.items():
-                    # Remove non-CSV columns
-                    csv_data = [remove_non_csv_fields(d) for d in sp_data]
-                    
-                    df = pd.DataFrame(csv_data)
-                    filename = f"sp_{sp_combo}_results.csv"
-                    file_path = method_dir / filename
-                    
-                    if save_csv_file(df, file_path):
-                        results[f"{method_combo}_sp_{sp_combo}"] = file_path
-            else:
-                # Handle OPT data
-                csv_data = [remove_non_csv_fields(d) for d in mode_data_list]
-                
-                df = pd.DataFrame(csv_data)
-                filename = f"opt_{method_combo}_results.csv"
-                file_path = method_dir / filename
-                
-                if save_csv_file(df, file_path):
-                    results[f"{method_combo}_opt"] = file_path
-    
-    return results
-
-
-def export_xyz_files(extracted_data: List[Dict[str, Any]], output_dir: Path) -> Dict[str, Path]:
-    """
-    Export XYZ files using data already extracted.
-    No data extraction - only file writing.
-    XYZ files are stored in the same method directory as CSV files.
-    """
-    # Use shared grouping logic
-    grouped = group_data_by_method_combo(extracted_data)
-    results = {}
-    
-    for method_combo, data_list in grouped.items():
-        # Use same method directory structure as CSV files
-        method_dir = output_dir / method_combo
-        xyz_dir = method_dir / "xyz"
-        xyz_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Only process OPT data with XYZ coordinates
-        for data in data_list:
-            if not is_xyz_exportable(data):
-                continue
+    for data in data_list:
+        if not data.get("coordinates"):
+            continue
             
-            # Create XYZ content from extracted data
-            xyz_content = create_xyz_content(data)
+        try:
+            # Create XYZ content using existing util function
+            from PyA3EDA.core.utils.xyz_format_utils import format_xyz_content
+            
+            coords = data["coordinates"]
+            n_atoms = coords.get('n_atoms', 0)
+            atoms = coords.get('atoms', [])
+            charge = coords.get('Charge', 0)
+            multiplicity = coords.get('Multiplicity', 1)
+            
+            xyz_content = format_xyz_content(n_atoms, charge, multiplicity, atoms)
             if not xyz_content:
                 continue
+                
+            # Generate filename - remove _opt suffix if present
+            species = data.get("Species", "unknown")
+            file_stem = data.get("output_file_stem", species)
             
-            # Use filename from extracted data, removing _opt suffix
-            stem = data['output_file_stem']
-            if stem.endswith('_opt'):
-                stem = stem[:-4]  # Remove '_opt' suffix
-            filename = f"{stem}.xyz"
-            xyz_file_path = xyz_dir / filename
+            # Remove _opt suffix if it exists at the end
+            if file_stem.endswith("_opt"):
+                file_stem = file_stem[:-4]
+                
+            filename = f"{file_stem}.xyz"
+
+            file_path = output_dir / filename
             
-            if write_text(xyz_file_path, xyz_content):
-                results[data['output_file_stem']] = xyz_file_path
-                logging.debug(f"Saved XYZ file: {xyz_file_path}")
+            # Write file
+            if write_text(file_path, xyz_content):
+                results[f"{species}"] = file_path
+                logging.debug(f"Written XYZ file: {file_path}")
+                
+        except Exception as e:
+            logging.error(f"Failed to write XYZ file for {data.get('Species', 'unknown')}: {e}")
+            continue
     
+    logging.info(f"Written {len(results)} XYZ files to {output_dir}")
     return results
 
 
-def remove_non_csv_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+def export_all_combos(extracted_data: Dict[str, Dict[str, List[Dict[str, Any]]]], output_dir: Path) -> None:
     """
-    Remove fields that shouldn't be in CSV files.
-    """
-    # Fields to exclude from CSV
-    exclude_fields = ["Path", "output_file_stem", "n_atoms", "atoms"]
+    Export all extracted method combo data to files.
     
-    return {k: v for k, v in data.items() if k not in exclude_fields}
-
-
-def is_xyz_exportable(data: Dict[str, Any]) -> bool:
+    Args:
+        extracted_data: Dictionary mapping method combo names to their extracted data
+        output_dir: Output directory for all exports
     """
-    Check if data contains XYZ coordinates for export.
-    """
-    return (
-        data.get("Mode") == "opt" and 
-        "n_atoms" in data and 
-        "atoms" in data and 
-        data.get("n_atoms", 0) > 0
-    )
-
-
-def create_xyz_content(data: Dict[str, Any]) -> str:
-    """
-    Create XYZ file content from extracted data.
-    Same format as XYZ templates.
-    """
-    n_atoms = data.get('n_atoms', 0)
-    atoms = data.get('atoms', [])
-    charge = data.get('Charge', 0)
-    multiplicity = data.get('Multiplicity', 1)
+    if not extracted_data:
+        logging.warning("No extracted data provided for export")
+        return
     
-    return format_xyz_content(n_atoms, charge, multiplicity, atoms)
-
-
-def save_csv_file(df: pd.DataFrame, file_path: Path) -> bool:
-    """
-    Save DataFrame to CSV file.
-    """
-    try:
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(file_path, index=False)
-        logging.info(f"Saved {len(df)} rows to {file_path}")
-        return True
-    except Exception as e:
-        logging.error(f"Error saving CSV to {file_path}: {e}")
-        return False
+    logging.info(f"Exporting {len(extracted_data)} method combos to {output_dir}")
+    
+    total_files = 0
+    
+    # Export each method combo
+    for combo_name, combo_data in extracted_data.items():
+        try:
+            # Create structured output directories
+            method_combo_dir = output_dir / "raw" / combo_name
+            xyz_dir = method_combo_dir / "xyz_files"
+            
+            combo_files = 0
+            
+            # Export OPT data
+            if combo_data.get("opt_data"):
+                opt_file_path = method_combo_dir / f"opt_{combo_name}.csv"
+                if write_opt_csv(combo_data["opt_data"], opt_file_path):
+                    combo_files += 1
+                    
+            # Export SP data
+            if combo_data.get("sp_data"):
+                sp_file_path = method_combo_dir / f"sp_{combo_name}.csv"
+                if write_sp_csv(combo_data["sp_data"], sp_file_path):
+                    combo_files += 1
+                    
+            # Export XYZ data
+            if combo_data.get("xyz_data"):
+                xyz_results = write_xyz_files(combo_data["xyz_data"], xyz_dir)
+                if xyz_results:
+                    combo_files += len(xyz_results)
+            
+            total_files += combo_files
+            logging.info(f"Exported {combo_name}: {combo_files} files")
+                
+        except Exception as e:
+            logging.error(f"Failed to export method combo {combo_name}: {e}")
+            continue
+    
+    logging.info(f"Export completed: {len(extracted_data)} method combos, {total_files} total files")
