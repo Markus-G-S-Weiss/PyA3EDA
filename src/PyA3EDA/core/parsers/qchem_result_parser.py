@@ -6,7 +6,6 @@ Each function focuses on a single parsing task without business logic or cross-f
 Returns raw parsed values that can be further processed by extraction logic.
 """
 import re
-import logging
 from typing import Optional, Tuple, Dict, Any, Pattern, List
 
 from PyA3EDA.core.utils.unit_converter import convert_energy_unit
@@ -14,9 +13,9 @@ from PyA3EDA.core.utils.unit_converter import convert_energy_unit
 
 # Regex patterns for data extraction
 PATTERNS = {
-    # Fixed patterns - only capture valid units, not formatting characters
+    # Energy patterns - separate for different contexts
     "final_energy": re.compile(r"Final energy is\s+([-+]?\d+\.\d+)(?:\s+([A-Za-z][A-Za-z0-9./\-]*))?\s*$", re.MULTILINE),
-    "final_energy_fallback": re.compile(r"Total energy =\s+([-+]?\d+\.\d+)(?:\s+([A-Za-z][A-Za-z0-9./\-]*))?\s*$", re.MULTILINE),
+    "total_energy": re.compile(r"Total energy =\s+([-+]?\d+\.\d+)(?:\s+([A-Za-z][A-Za-z0-9./\-]*))?\s*$", re.MULTILINE),
     "optimization_status": re.compile(r"(OPTIMIZATION CONVERGED|TRANSITION STATE CONVERGED)"),
     "thermodynamics": re.compile(r"STANDARD THERMODYNAMIC QUANTITIES AT\s+([-+]?\d+\.\d+)\s*K\s+AND\s+([-+]?\d+\.\d+)\s*ATM"),
     "imaginary_frequencies": re.compile(r"This Molecule has\s+(\d+)\s+Imaginary Frequencies"),
@@ -29,9 +28,9 @@ PATTERNS = {
     # SMD CDS energy patterns
     "smd_g_enp": re.compile(r"\(3\)\s+G-ENP\(liq\) elect-nuc-pol free energy of system\s+([-+]?\d+\.\d+)\s+a\.u\.", re.MULTILINE),
     "smd_g_s": re.compile(r"\(6\)\s+G-S\(liq\) free energy of system\s+([-+]?\d+\.\d+)\s+a\.u\.", re.MULTILINE),
-    "smd_cds_kcal": re.compile(r"\(4\)\s+G-CDS\(liq\) cavity-dispersion-solvent structure\s+([-+]?\d+\.\d+)\s+kcal/mol", re.MULTILINE),
+    "smd_cds_detail": re.compile(r"\(4\)\s+G-CDS\(liq\) cavity-dispersion-solvent structure\s+([-+]?\d+\.\d+)\s+kcal/mol", re.MULTILINE),
     "smd_cds_summary": re.compile(r"G_CDS\s+=\s+([-+]?\d+\.\d+)\s+kcal/mol", re.MULTILINE),
-    "smd_cds_sp_total": re.compile(r"Total:\s+([-+]?\d+\.\d+)\s*\n\s*-+", re.MULTILINE),
+    "smd_cds_extended_print": re.compile(r"Total:\s+([-+]?\d+\.\d+)\s*\n\s*-+", re.MULTILINE),
     # EDA-specific patterns
     "eda_polarized_energy": re.compile(r"Energy prior to optimization \(guess energy\)\s*=\s*([-+]?\d+\.\d+)", re.MULTILINE),
     "eda_convergence_energy": re.compile(r"^\s*\d+\s+([-+]?\d+\.\d+)\s+[\d.e-]+\s+\d+\s+Convergence criterion met", re.MULTILINE),
@@ -111,10 +110,36 @@ def extract_with_pattern(content: str, primary_pattern: Pattern, fallback_patter
 # PURE PARSING FUNCTIONS - Each function parses one specific data type
 
 
+def parse_final_energy(content: str) -> Optional[Dict[str, Any]]:
+    """Parse final energy from OPT calculations (Final energy is pattern)."""
+    result, _ = extract_with_pattern(content, PATTERNS["final_energy"], default_unit="Ha")
+    
+    if result is not None:
+        energy_value, energy_unit = result
+        return {
+            f"E ({energy_unit})": energy_value,
+            "E (kcal/mol)": convert_energy_unit(energy_value, energy_unit, "kcal/mol")
+        }
+    return None
+
+
+def parse_total_energy(content: str) -> Optional[Dict[str, Any]]:
+    """Parse total energy from SP calculations (Total energy = pattern)."""
+    result, _ = extract_with_pattern(content, PATTERNS["total_energy"], default_unit="Ha")
+    
+    if result is not None:
+        energy_value, energy_unit = result
+        return {
+            f"E ({energy_unit})": energy_value,
+            "E (kcal/mol)": convert_energy_unit(energy_value, energy_unit, "kcal/mol")
+        }
+    return None
+
+
 def parse_energy(content: str) -> Optional[Dict[str, Any]]:
-    """Parse final energy from Q-Chem output content."""
+    """Parse energy with fallback - tries final energy first, then total energy."""
     result, fallback_used = extract_with_pattern(
-        content, PATTERNS["final_energy"], PATTERNS["final_energy_fallback"], default_unit="Ha")
+        content, PATTERNS["final_energy"], PATTERNS["total_energy"], default_unit="Ha")
     
     if result is not None:
         energy_value, energy_unit = result
@@ -188,30 +213,39 @@ def parse_zero_point_energy(content: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def parse_smd_cds_raw_values(content: str) -> Optional[Dict[str, Any]]:
+def parse_smd_detail_block(content: str) -> Optional[Dict[str, Any]]:
     """
-    Parse raw SMD CDS energy values from Q-Chem output content.
-    Returns only the final/last values since intermediate values are not needed.
-    Does NOT perform cross-file validation or complex logic - just extracts raw values.
+    Parse SMD detailed energy components from Q-Chem output (OPT and regular SP files).
+    Extracts G-ENP, G-S, and detailed G-CDS values from the detailed SMD block.
     """
     result = {}
     
-    # Define value extractors - pattern name maps to result key
-    extractors = [
-        ("smd_g_s", "g_s_final"),
-        ("smd_g_enp", "g_enp_final"),
-        ("smd_cds_kcal", "cds_kcal_final"),
-        ("smd_cds_summary", "cds_summary_final"),
-        ("smd_cds_sp_total", "cds_sp_total_final")
-    ]
+    # Extract G-ENP (Hartree)
+    g_enp_value, _ = extract_with_pattern(content, PATTERNS["smd_g_enp"])
+    if g_enp_value is not None:
+        result["g_enp_final"] = g_enp_value
     
-    # Extract each value using the same pattern
-    for pattern_name, result_key in extractors:
-        value, _ = extract_with_pattern(content, PATTERNS[pattern_name])
-        if value is not None:
-            result[result_key] = value
+    # Extract G-S (Hartree)  
+    g_s_value, _ = extract_with_pattern(content, PATTERNS["smd_g_s"])
+    if g_s_value is not None:
+        result["g_s_final"] = g_s_value
+        
+    # Extract detailed CDS (kcal/mol)
+    cds_detail_value, _ = extract_with_pattern(content, PATTERNS["smd_cds_detail"])
+    if cds_detail_value is not None:
+        result["cds_detail_final"] = cds_detail_value
     
     return result if result else None
+
+
+def parse_smd_cds_extended_print(content: str) -> Optional[float]:
+    """
+    Parse CDS value from extended print pattern (uses "Total:" pattern).
+    This is used in EDA calc_type calculations for CDS validation.
+    Returns the CDS value in kcal/mol.
+    """
+    cds_value, _ = extract_with_pattern(content, PATTERNS["smd_cds_extended_print"])
+    return cds_value if cds_value is not None else None
 
 
 def parse_eda_polarized_energy(content: str) -> Optional[Dict[str, Any]]:
