@@ -1,12 +1,14 @@
 """
-Data Extractor Module
-Orchestrates data extraction using pure parsing functions.
-Handles business logic, cross-file operations, and extraction decisions.
+Data extraction module with method combo-based architecture.
+
+This module provides clean separation of concerns for data extraction:
+- Core extraction functions for OPT and SP data  
+- Method combo processing with immediate file separation
+- Pipeline orchestration from extraction to export
 """
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from collections import defaultdict
 
 from PyA3EDA.core.utils.file_utils import read_text
 from PyA3EDA.core.parsers.qchem_result_parser import (
@@ -18,9 +20,146 @@ from PyA3EDA.core.parsers.qchem_result_parser import (
 from PyA3EDA.core.parsers.output_xyz_parser import parse_qchem_output_xyz
 from PyA3EDA.core.status.status_checker import should_process_file
 from PyA3EDA.core.utils.unit_converter import convert_energy_unit
+from PyA3EDA.core.builders.builder import iter_input_paths
 
 
-# EXTRACTION ORCHESTRATION FUNCTIONS (using metadata directly)
+# CORE EXTRACTION FUNCTIONS (pure)
+def extract_opt_data(file_path: Path, metadata: Dict[str, Any], criteria: str = "SUCCESSFUL") -> Optional[Dict[str, Any]]:
+    """
+    Extract all data from OPT output file.
+    
+    Args:
+        file_path: Path to OPT output file
+        metadata: File metadata from builder
+        criteria: Status criteria for file processing
+        
+    Returns:
+        Dictionary with extracted OPT data or None if extraction fails
+    """
+    # Get corresponding input file for status checking
+    input_path = file_path.with_suffix(".in")
+    
+    # Check if file should be processed (backward compatible without metadata)
+    should_process, reason = should_process_file(input_path, criteria, metadata=None)
+    if not should_process:
+        logging.debug(f"Skipping file {reason}: {file_path}")
+        return None
+        
+    # Read file content
+    content = read_text(file_path)
+    if not content:
+        logging.warning(f"Failed to read file content: {file_path}")
+        return None
+        
+    # Initialize result with metadata
+    result = {**metadata}
+    result["output_file_stem"] = file_path.stem
+    
+    # Extract thermodynamic data using existing function
+    thermo_data = _extract_opt_thermodynamic_data(content)
+    if thermo_data:
+        result.update(thermo_data)
+        return result
+    else:
+        logging.warning(f"Failed to parse OPT data from: {file_path}")
+        return None
+
+
+def extract_sp_data(file_path: Path, metadata: Dict[str, Any], criteria: str = "SUCCESSFUL", opt_content: str = None) -> Optional[Dict[str, Any]]:
+    """
+    Extract all data from SP output file.
+    
+    Args:
+        file_path: Path to SP output file
+        metadata: File metadata from builder
+        opt_content: Optional OPT content for thermodynamic corrections
+        criteria: Status criteria for file processing
+        
+    Returns:
+        Dictionary with extracted SP data or None if extraction fails
+    """
+    # Get corresponding input file for status checking
+    input_path = file_path.with_suffix(".in")
+    
+    # Check if file should be processed (backward compatible without metadata)
+    should_process, reason = should_process_file(input_path, criteria, metadata=None)
+    if not should_process:
+        logging.debug(f"Skipping file {reason}: {file_path}")
+        return None
+    
+    # Read file content
+    sp_content = read_text(file_path)
+    if not sp_content:
+        logging.warning(f"Failed to read file content: {file_path}")
+        return None
+        
+    # Initialize result with metadata
+    result = {**metadata}
+    
+    # Extract SP thermodynamic data using existing function
+    thermo_data = _extract_sp_thermodynamic_data(sp_content, metadata, opt_content)
+    if thermo_data:
+        result.update(thermo_data)
+        
+        # Apply thermodynamic corrections if OPT content available
+        if opt_content:
+            apply_thermodynamic_corrections(result, opt_content)
+            
+        return result
+    else:
+        logging.warning(f"Failed to parse SP data from: {file_path}")
+        return None
+
+
+def extract_xyz_data(file_path: Path, metadata: Dict[str, Any], criteria: str = "SUCCESSFUL") -> Optional[Dict[str, Any]]:
+    """
+    Extract XYZ coordinate data from output file.
+    
+    Args:
+        file_path: Path to output file
+        metadata: File metadata from builder
+        criteria: Status criteria for file processing
+        
+    Returns:
+        Dictionary with XYZ coordinate data or None if extraction fails
+    """
+    # Get corresponding input file for status checking
+    input_path = file_path.with_suffix(".in")
+    
+    # Check if file should be processed (backward compatible without metadata)
+    should_process, reason = should_process_file(input_path, criteria, metadata=None)
+    if not should_process:
+        logging.debug(f"Skipping XYZ extraction for {file_path.name}: {reason}")
+        return None
+def apply_thermodynamic_corrections(data: Dict[str, Any], opt_content: str) -> None:
+    """
+    Apply thermodynamic corrections from OPT content to SP data.
+    
+    Args:
+        data: SP data dictionary to update
+        opt_content: OPT file content for corrections
+    """
+    # Extract corrections from OPT content
+    corrections = {}
+    correction_parsers = [
+        (parse_enthalpy, None),
+        (parse_entropy, None), 
+        (parse_thermodynamic_conditions, None)
+    ]
+    
+    for parser_func, _ in correction_parsers:
+        parser_data = parser_func(opt_content)
+        if parser_data:
+            corrections.update(parser_data)
+    
+    # Apply corrections and calculate derived values
+    if corrections:
+        data.update(corrections)
+        _calculate_derived_values(data)
+        logging.debug(f"Applied thermodynamic corrections: H={data.get('H (kcal/mol)', 'N/A')}, G={data.get('G (kcal/mol)', 'N/A')}")
+
+
+# EXISTING PRIVATE HELPER FUNCTIONS (keep as-is for now)
 
 def _extract_opt_thermodynamic_data(content: str) -> Dict[str, Any]:
     """
@@ -126,7 +265,12 @@ def _extract_sp_thermodynamic_data(sp_content: str, metadata: Dict[str, Any], op
             cds_data = _extract_smd_cds_energy(opt_content, sp_content)
             if cds_data:
                 data.update(cds_data)
-                logging.debug(f"Applied CDS correction: {cds_data.get('G_CDS (kcal/mol)', 0):.4f} kcal/mol for regular SP")
+                # Apply CDS correction to final SP energy (like EDA calculations)
+                cds_value_kcal = cds_data.get("G_CDS (kcal/mol)", 0.0)
+                cds_value_ha = cds_data.get("G_CDS (Ha)", 0.0)
+                data["SP_E (kcal/mol)"] += cds_value_kcal
+                data[f"SP_E ({energy_unit})"] += cds_value_ha
+                logging.debug(f"Applied CDS correction: {cds_value_kcal:.4f} kcal/mol for regular SP")
         
         logging.debug(f"Regular SP energy extraction successful: {data['SP_E (kcal/mol)']:.4f} kcal/mol")
     
@@ -295,9 +439,8 @@ def _extract_smd_cds_energy(opt_content: str = None, sp_content: str = None) -> 
     
     # Return consolidated result with OPT-derived CDS for SP calculations
     result = {
-        "G_CDS (Ha)": convert_energy_unit(primary_value, "kcal/mol", "Ha"),
+        "G_CDS (Ha)": cds_hartree,
         "G_CDS (kcal/mol)": primary_value,
-        "G_CDS_Source": primary_source
     }
     result.update(validation_info)
     return result
@@ -306,12 +449,18 @@ def _extract_smd_cds_energy(opt_content: str = None, sp_content: str = None) -> 
 def _calculate_derived_values(data: Dict[str, Any]) -> None:
     """
     Calculate derived thermodynamic values (H and G) in place.
+    Uses the final extracted energy: SP_E for SP calculations, E for OPT calculations.
     
     Args:
         data: Dictionary containing parsed data to modify
     """
-    # Use CDS energy for calculations if available (SMD solvent calculations)
-    base_energy_key = "G_CDS (kcal/mol)" if "G_CDS (kcal/mol)" in data else "E (kcal/mol)"
+    # Determine base energy key based on calculation type
+    # For SP calculations: use SP_E (kcal/mol) which includes all corrections (CDS, BSSE)
+    # For OPT calculations: use E (kcal/mol) which is the base extracted energy
+    if "SP_E (kcal/mol)" in data:
+        base_energy_key = "SP_E (kcal/mol)"
+    else:
+        base_energy_key = "E (kcal/mol)"
     
     # Calculate H (kcal/mol)
     if base_energy_key in data and "Total Enthalpy Corr. (kcal/mol)" in data:
@@ -322,239 +471,202 @@ def _calculate_derived_values(data: Dict[str, Any]) -> None:
         data["G (kcal/mol)"] = data["H (kcal/mol)"] - data["Temperature (K)"] * data["Total Entropy Corr. (kcal/mol.K)"]
 
 
-def extract_sp_data_with_opt_content(output_path: Path, sp_content: str, metadata: Dict[str, Any], opt_content: str = None) -> Optional[Dict[str, Any]]:
+# METHOD COMBO PROCESSING 
+def extract_method_combo_data(config_manager, method_combo_name: str, system_dir: Path, criteria: str = "SUCCESSFUL") -> Dict[str, List[Dict[str, Any]]]:
     """
-    Extract SP data with direct access to OPT content, eliminating cross-file dependencies.
+    Extract data from all files in a method combo, organized by file type.
+    Uses iter_input_paths as single source of truth for file discovery.
     
     Args:
-        output_path: Path to the SP output file
-        sp_content: SP file content (already read)
-        metadata: SP metadata from builder
-        opt_content: OPT content for SMD validation (if needed)
+        config_manager: ConfigManager instance
+        method_combo_name: Name of method combo
+        system_dir: System directory containing method combo folders
+        criteria: Status criteria for file selection
         
     Returns:
-        Dictionary containing extracted SP data or None if extraction fails
+        Dictionary with keys "opt_data", "sp_data", "xyz_data" containing respective data lists
     """
-    # Initialize result with metadata
-    result = {**metadata}
-    result["output_file_stem"] = output_path.stem
-    
-    # Extract SP thermodynamic data with OPT content
-    thermo_data = _extract_sp_thermodynamic_data(sp_content, metadata, opt_content)
-    if thermo_data:
-        result.update(thermo_data)
-        result["extraction_status"] = {"thermo": True, "xyz": False}
-        return result
-    else:
-        logging.warning(f"Failed to parse SP data from: {output_path}")
-        return None
-
-
-def extract_all_data_from_output(output_path: Path, metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
-    Extract data from Q-Chem output files.
-    Now primarily used for OPT files since SP files are handled by the pre-grouped approach.
-    
-    Args:
-        output_path: Path to the Q-Chem output file
-        metadata: Metadata from builder
-        
-    Returns:
-        Dictionary containing all extracted data or None if no data could be extracted
-    """
-    # Read content once (single file read)
-    content = read_text(output_path)
-    if not content:
-        logging.warning(f"Could not read content from: {output_path}")
-        return None
-    
-    # Determine mode from metadata
-    mode = metadata.get("Mode", "unknown")
-    
-    # Initialize result with metadata
-    result = {**metadata}
-    result["output_file_stem"] = output_path.stem
-    
-    # Track what was successfully extracted
-    extraction_success = {"thermo": False, "xyz": False}
-    
-    # Extract data based on mode
-    if mode == "opt":
-        # Extract thermodynamic data
-        thermo_data = _extract_opt_thermodynamic_data(content)
-        if thermo_data:
-            result.update(thermo_data)
-            extraction_success["thermo"] = True
-        else:
-            logging.warning(f"Failed to parse thermodynamic data from: {output_path}")
-            
-        # Extract XYZ coordinates for OPT files (independent of thermodynamic data)
-        species = metadata.get("Species", "unknown")
-        xyz_data = parse_qchem_output_xyz(content, species)
-        if xyz_data:
-            result.update(xyz_data)
-            extraction_success["xyz"] = True
-            
-            # Log if charge/multiplicity defaulted to 0 1
-            if xyz_data.get("Charge") == 0 and xyz_data.get("Multiplicity") == 1:
-                logging.debug(f"Using default charge/multiplicity (0 1) for {species} from: {output_path}")
-        else:
-            logging.debug(f"No XYZ coordinates found in: {output_path}")
-            
-    elif mode == "sp":
-        # SP files should now be processed by extract_sp_data_with_opt_content
-        logging.warning(f"SP file {output_path} should be processed by pre-grouped approach, not this function")
-        return None
-        
-    else:
-        logging.warning(f"Unknown calculation mode '{mode}' for: {output_path}")
-        return None
-    
-    # Return result if we extracted any data, otherwise None
-    if extraction_success["thermo"] or extraction_success["xyz"]:
-        # Add extraction status for statistics
-        result["extraction_status"] = extraction_success
-        return result
-    else:
-        logging.warning(f"No data could be extracted from: {output_path}")
-        return None
-
-
-def extract_all_data(config: dict, system_dir: Path, criteria: str = "SUCCESSFUL") -> List[Dict[str, Any]]:
-    """
-    Extract all data using pre-grouped file processing to eliminate cross-file dependencies.
-    Groups files by calculation (species, calc_type, method_combo) and processes pairs together.
-    """
-    logging.info(f"Extracting data with criteria: {criteria}")
-    
-    from PyA3EDA.core.builders.builder import iter_input_paths
-    
-    # Get all paths with metadata
-    input_items = list(iter_input_paths(config, system_dir, include_metadata=True))
-    
-    # Pre-group files by calculation (species, calc_type, method_combo)
-    calculation_groups = defaultdict(dict)
-    
-    for item in input_items:
-        if not item or not hasattr(item, 'path') or not hasattr(item, 'metadata'):
-            continue
-            
-        input_path = item.path
-        metadata = item.metadata
-        
-        if not input_path.exists():
-            continue
-            
-        # Create unique key for this calculation
-        calc_key = (
-            metadata.get("Species", "unknown"),
-            metadata.get("Calc_Type", "unknown"), 
-            metadata.get("Method_Combo", "unknown")
-        )
-        
-        mode = metadata.get("Mode", "unknown")
-        calculation_groups[calc_key][mode] = {
-            "path": input_path,
-            "metadata": metadata,
-            "output_path": input_path.with_suffix('.out')
-        }
-    
-    # Process grouped calculations
-    extracted_data = []
-    stats = {
-        "processed_calculations": 0,
-        "processed_files": 0, 
-        "complete_success": 0,
-        "partial_success": 0,
-        "total_failures": 0
+    result = {
+        "opt_data": [],
+        "sp_data": [],
+        "xyz_data": []
     }
     
-    def _process_file(file_info, mode_type, criteria, stats, opt_content=None):
-        """Process a single file and update statistics."""
-        if not file_info["output_path"].exists():
-            return None, None
-            
-        should_extract, _ = should_process_file(file_info["path"], criteria)
-        if not should_extract:
-            return None, None
-            
-        stats["processed_files"] += 1
-        content = read_text(file_info["output_path"])
-        
-        if not content:
-            logging.warning(f"Could not read {mode_type.upper()} content from: {file_info['output_path']}")
-            stats["total_failures"] += 1
-            return None, content
-        
-        # Extract data based on mode type
-        if mode_type == "opt":
-            data = extract_all_data_from_output(file_info["output_path"], file_info["metadata"])
-        elif mode_type == "sp":
-            # Determine if OPT content is needed for SMD validation (metadata directly)
-            needs_opt_content = (file_info["metadata"].get("SP_Solvent", "gas").lower() != "gas" and opt_content)
-            data = extract_sp_data_with_opt_content(
-                file_info["output_path"], 
-                content,
-                file_info["metadata"],
-                opt_content if needs_opt_content else None
-            )
-        else:
-            data = None
-        
-        if data:
-            stats["complete_success"] += 1
-        else:
-            stats["total_failures"] += 1
-            
-        return data, content
+    logging.info(f"Processing method combo: {method_combo_name}")
     
-    for calc_key, modes in calculation_groups.items():
-        stats["processed_calculations"] += 1
-        logging.debug(f"Processing calculation group: {calc_key}")
+    # Get all input files using iter_input_paths (single source of truth)
+    input_files = []
+    try:
+        for file_info in iter_input_paths(config_manager, system_dir, include_metadata=True):
+            if file_info and hasattr(file_info, 'metadata') and hasattr(file_info, 'path'):
+                # Filter files that belong to this method combo
+                if file_info.metadata.get("Method_Combo") == method_combo_name:
+                    input_files.append((file_info.path, file_info.metadata))
+    except Exception as e:
+        logging.error(f"Failed to get input files for method combo {method_combo_name}: {e}")
+        return result
         
-        # Process OPT files first to get content for SP cross-validation
-        opt_content = None
-        
-        if "opt" in modes:
-            opt_data, opt_content = _process_file(modes["opt"], "opt", criteria, stats)
-            if opt_data:
-                extracted_data.append(opt_data)
-        
-        # Process SP files with direct access to OPT content
-        if "sp" in modes:
-            sp_data, _ = _process_file(modes["sp"], "sp", criteria, stats, opt_content)
-            if sp_data:
-                extracted_data.append(sp_data)
+    if not input_files:
+        logging.warning(f"No input files found for method combo: {method_combo_name}")
+        return result
     
-    # Log detailed statistics
-    total_extracted = stats["complete_success"] + stats["partial_success"]
-    logging.info(f"Pre-grouped extraction: {stats['processed_calculations']} calculation groups, "
-                f"{stats['processed_files']} files processed, {total_extracted} successful extractions, "
-                f"{stats['total_failures']} failures")
-    return extracted_data
+    # Process files by type
+    opt_files = [(path, meta) for path, meta in input_files if meta.get("Mode") == "opt"]
+    sp_files = [(path, meta) for path, meta in input_files if meta.get("Mode") == "sp"]
+    
+    # Extract OPT data first (needed for SP corrections)
+    opt_content_cache = {}
+    for input_path, metadata in opt_files:
+        output_path = input_path.with_suffix(".out")
+        
+        # Use consistent status checking (backward compatible without metadata)
+        should_process, reason = should_process_file(input_path, criteria, metadata=None)
+        if not should_process:
+            logging.debug(f"Skipping OPT file {reason}: {input_path}")
+            continue
+            
+        opt_data = extract_opt_data(output_path, metadata, criteria)
+        if opt_data:
+            # Add CSV-ready data (coordinates are NOT included here)
+            result["opt_data"].append(opt_data)
+            
+            # Cache OPT content for SP corrections
+            opt_content = read_text(output_path)
+            if opt_content:
+                opt_content_cache[metadata.get("Species", "unknown")] = opt_content
+                
+        # Extract XYZ data separately (completely separate from CSV data)
+        xyz_data = extract_xyz_data(output_path, metadata, criteria)
+        if xyz_data:
+            result["xyz_data"].append(xyz_data)
+    
+    # Extract SP data with OPT corrections
+    for input_path, metadata in sp_files:
+        output_path = input_path.with_suffix(".out")
+        
+        # Use consistent status checking (backward compatible without metadata)
+        should_process, reason = should_process_file(input_path, criteria, metadata=None)
+        if not should_process:
+            logging.debug(f"Skipping SP file {reason}: {input_path}")
+            continue
+            
+        # Get corresponding OPT content for corrections
+        species = metadata.get("Species", "unknown")
+        opt_content = opt_content_cache.get(species)
+        
+        sp_data = extract_sp_data(output_path, metadata, criteria, opt_content)
+        if sp_data:
+            # Add CSV-ready data (coordinates are NOT included here)
+            result["sp_data"].append(sp_data)
+
+    logging.info(f"Extracted from {method_combo_name}: {len(result['opt_data'])} OPT, {len(result['sp_data'])} SP, {len(result['xyz_data'])} XYZ")
+    return result
 
 
-def extract_and_save(config: dict, system_dir: Path, output_dir: Path = None, 
-                    criteria: str = "SUCCESSFUL") -> Dict[str, Any]:
+def extract_and_export_method_combo(config_manager, method_combo_name: str, system_dir: Path, output_dir: Path, criteria: str = "SUCCESSFUL") -> Dict[str, Any]:
     """
-    Main coordination function - extract once, export multiple formats.
+    Extract data from method combo and immediately export to separate files.
     
     Args:
-        config: Configuration dictionary
-        system_dir: System directory path
-        output_dir: Output directory path
-        criteria: Extraction criteria
+        config_manager: ConfigManager instance (not processed config)
+        method_combo_name: Name of method combo (e.g., "m06_6311gd_gas")
+        system_dir: System directory containing method combo folders
+        output_dir: Output directory for export files
+        criteria: Status criteria for file selection
         
     Returns:
-        Dictionary of export results
+        Export results summary
     """
-    # Extract all data once
-    extracted_data = extract_all_data(config, system_dir, criteria)
+    # Extract data organized by type
+    combo_data = extract_method_combo_data(config_manager, method_combo_name, system_dir, criteria)
     
-    # Set default output directory
-    if not output_dir:
-        output_dir = system_dir / "results" / "raw"
+    if not any(combo_data.values()):
+        logging.warning(f"No data extracted for method combo: {method_combo_name}")
+        return {}
     
-    # Export data in multiple formats using single extracted data
-    from PyA3EDA.core.exporters.data_exporter import export_all_formats
-    return export_all_formats(extracted_data, output_dir)
+    # Import exporter functions
+    from PyA3EDA.core.exporters.data_exporter import write_opt_csv, write_sp_csv, write_xyz_files
+    
+    # Create structured output directories based on user specification:
+    # results/raw/{method_combo_name}/
+    # results/raw/{method_combo_name}/xyz_files/
+    method_combo_dir = output_dir / "raw" / method_combo_name
+    xyz_dir = method_combo_dir / "xyz_files"
+    
+    export_results = {}
+    
+    # Export OPT data to method combo directory
+    if combo_data["opt_data"]:
+        opt_file_path = method_combo_dir / f"opt_{method_combo_name}.csv"
+        if write_opt_csv(combo_data["opt_data"], opt_file_path):
+            export_results["opt_csv"] = opt_file_path
+            
+    # Export SP data to method combo directory
+    if combo_data["sp_data"]:
+        sp_file_path = method_combo_dir / f"sp_{method_combo_name}.csv"
+        if write_sp_csv(combo_data["sp_data"], sp_file_path):
+            export_results["sp_csv"] = sp_file_path
+            
+    # Export XYZ data to xyz_files subdirectory within method combo directory
+    if combo_data["xyz_data"]:
+        xyz_results = write_xyz_files(combo_data["xyz_data"], xyz_dir)
+        if xyz_results:
+            export_results["xyz_files"] = xyz_results
+    
+    logging.info(f"Exported method combo {method_combo_name}: {len(export_results)} file types")
+    return export_results
+
+
+def extract_and_export_all_combos(config_manager, system_dir: Path, output_dir: Path, criteria: str = "SUCCESSFUL") -> Dict[str, Any]:
+    """
+    Extract and export data for all method combos using iter_input_paths as single source of truth.
+    
+    Args:
+        config_manager: ConfigManager instance (not processed config)
+        system_dir: System directory containing method combo folders
+        output_dir: Output directory for all exports
+        criteria: Status criteria for file selection
+        
+    Returns:
+        Combined export results for all method combos
+    """
+    all_results = {}
+    
+    # Get all method combos from iter_input_paths (single source of truth)
+    method_combos = {}
+    try:
+        for file_info in iter_input_paths(config_manager, system_dir, include_metadata=True):
+            if file_info and hasattr(file_info, 'metadata'):
+                method_combo = file_info.metadata.get("Method_Combo")
+                if method_combo:
+                    if method_combo not in method_combos:
+                        method_combos[method_combo] = []
+                    method_combos[method_combo].append((file_info.path, file_info.metadata))
+    except Exception as e:
+        logging.error(f"Failed to discover method combos: {e}")
+        return all_results
+        
+    if not method_combos:
+        logging.warning(f"No method combos found in: {system_dir}")
+        return all_results
+        
+    logging.info(f"Found {len(method_combos)} method combos: {sorted(method_combos.keys())}")
+    
+    # Process each method combo
+    for combo_name in sorted(method_combos.keys()):
+        try:
+            combo_results = extract_and_export_method_combo(config_manager, combo_name, system_dir, output_dir, criteria)
+            if combo_results:
+                all_results[combo_name] = combo_results
+        except Exception as e:
+            logging.error(f"Failed to process method combo {combo_name}: {e}")
+            continue
+    
+    # Summary statistics
+    total_combos = len(all_results)
+    total_files = sum(len(results) for results in all_results.values())
+    
+    logging.info(f"Completed extraction and export: {total_combos} method combos, {total_files} total files")
+    return all_results
+
+
