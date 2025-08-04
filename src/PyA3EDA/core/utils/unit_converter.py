@@ -19,43 +19,51 @@ def convert_energy_unit(value: float, unit: str, target_unit: str = "kcal/mol") 
     Returns:
         The converted value in target units
     """
-    if unit == target_unit:
-        return value
-    
     # Normalize unit names for comparison
     unit_lower = unit.lower()
     target_lower = target_unit.lower()
     
-    # Handle Hartree to kcal/mol conversion
-    if unit_lower in ["hartree", "ha", "a.u."] and target_lower == "kcal/mol":
-        return value * Constants.HARTREE_TO_KCALMOL
+    # Define equivalent unit groups
+    hartree_units = {"hartree", "ha", "a.u."}
+    kcalmol_units = {"kcal/mol"}
+    kjmol_units = {"kj/mol"}
+    calmolkelvin_units = {"cal/mol.k"}
+    kcalmolkelvin_units = {"kcal/mol.k"}
     
-    # Handle Hartree to Ha conversion (identity but for consistency)
-    if unit_lower in ["hartree", "ha", "a.u."] and target_lower in ["hartree", "ha", "a.u."]:
+    # Check if source and target are equivalent (same unit group)
+    if ((unit_lower in hartree_units and target_lower in hartree_units) or
+        (unit_lower in kcalmol_units and target_lower in kcalmol_units) or
+        (unit_lower in kjmol_units and target_lower in kjmol_units) or
+        (unit_lower in calmolkelvin_units and target_lower in kcalmolkelvin_units) or
+        (unit_lower in kcalmolkelvin_units and target_lower in kcalmolkelvin_units)):
         return value
     
+    # Handle Hartree to kcal/mol conversion
+    if unit_lower in hartree_units and target_lower in kcalmol_units:
+        return value * Constants.HARTREE_TO_KCALMOL
+    
     # Handle kcal/mol to Hartree conversion
-    if unit_lower == "kcal/mol" and target_lower in ["hartree", "ha", "a.u."]:
+    if unit_lower in kcalmol_units and target_lower in hartree_units:
         return value / Constants.HARTREE_TO_KCALMOL
     
+    # Handle Hartree to kJ/mol conversion
+    if unit_lower in hartree_units and target_lower in kjmol_units:
+        return value * Constants.HARTREE_TO_KJMOL
+
+    # Handle kJ/mol to Hartree conversion
+    if unit_lower in kjmol_units and target_lower in hartree_units:
+        return value / Constants.HARTREE_TO_KJMOL
+
     # Handle kJ/mol to kcal/mol conversion
-    if unit_lower == "kj/mol" and target_lower == "kcal/mol":
+    if unit_lower in kjmol_units and target_lower in kcalmol_units:
         return value * Constants.KJMOL_TO_KCALMOL
     
     # Handle kcal/mol to kJ/mol conversion
-    if unit_lower == "kcal/mol" and target_lower == "kj/mol":
+    if unit_lower in kcalmol_units and target_lower in kjmol_units:
         return value / Constants.KJMOL_TO_KCALMOL
     
-    # Handle kJ/mol to Hartree conversion
-    if unit_lower == "kj/mol" and target_lower in ["hartree", "ha", "a.u."]:
-        return value * Constants.KJMOL_TO_KCALMOL / Constants.HARTREE_TO_KCALMOL
-    
-    # Handle Hartree to kJ/mol conversion
-    if unit_lower in ["hartree", "ha", "a.u."] and target_lower == "kj/mol":
-        return value * Constants.HARTREE_TO_KCALMOL / Constants.KJMOL_TO_KCALMOL
-    
     # Handle cal/mol to kcal/mol conversion (for entropy)
-    if unit_lower in ["cal/mol.k", "cal/mol·k"] and target_lower == "kcal/mol.k":
+    if unit_lower in calmolkelvin_units and target_lower in kcalmolkelvin_units:
         return value * Constants.TO_KILO
     
     # If we don't know how to convert, log warning and return original
