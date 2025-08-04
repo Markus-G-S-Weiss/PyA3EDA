@@ -186,7 +186,7 @@ def extract_xyz_data(file_path: Path, metadata: Dict[str, Any], criteria: str = 
 def extract_opt_thermodynamic_data(content: str) -> Dict[str, Any]:
     """Extract thermodynamic data from OPT calculation."""
     data = {}
-    
+
     # Basic energy extraction - parse_energy returns a dictionary with default prefix (keeps "E")
     energy_data = parse_energy(content)
     if energy_data:
@@ -440,79 +440,6 @@ def _extract_eda_sp(sp_content: str, calc_type: str, metadata: Dict[str, Any], o
     })
     
     return data
-
-
-# def extract_smd_cds_energy(opt_content: str = None, sp_content: str = None) -> Optional[Dict[str, Any]]:
-#     """
-#     Extract and validate SMD CDS energy using cross-file validation with consolidated parsers.
-    
-#     Args:
-#         opt_content: OPT file content for primary CDS calculation
-#         sp_content: SP file content for validation
-        
-#     Returns:
-#         Dictionary with validated CDS energy or None
-#     """
-#     primary_value = None
-#     primary_source = None
-#     cds_hartree = None
-#     validation_info = {}
-    
-#     # Extract SMD values from OPT content using detail block parser
-#     if opt_content:
-#         opt_detail_data = parse_smd_detail_block(opt_content)
-#         if opt_detail_data:
-#             # Primary method: Calculate from G-S and G-ENP components
-#             if "g_s_final" in opt_detail_data and "g_enp_final" in opt_detail_data:
-#                 g_s_final = opt_detail_data["g_s_final"]
-#                 g_enp_final = opt_detail_data["g_enp_final"]
-#                 cds_hartree = g_s_final - g_enp_final
-#                 primary_value = convert_energy_unit(cds_hartree, "Ha", "kcal/mol")
-#                 primary_source = "opt_calculated_from_components"
-                
-#                 # Validation 1: Against OPT detail value (4 decimal tolerance)
-#                 if "cds_detail_final" in opt_detail_data:
-#                     detail_val = opt_detail_data["cds_detail_final"]
-#                     validation_info["opt_detail_match"] = abs(primary_value - detail_val) <= 0.0001
-#                     validation_info["opt_detail_diff"] = abs(primary_value - detail_val)
-#                     if not validation_info["opt_detail_match"]:
-#                         logging.warning(f"CDS validation failed (OPT detail): calculated={primary_value:.4f}, detail={detail_val:.4f} kcal/mol")
-            
-#             # Fallback to OPT detail value if components not available
-#             elif "cds_detail_final" in opt_detail_data:
-#                 primary_value = opt_detail_data["cds_detail_final"]
-#                 cds_hartree = convert_energy_unit(primary_value, "kcal/mol", "hartree")
-#                 primary_source = "opt_detail_value"
-    
-#     # Validation 2: Against SP file using appropriate parser (3 decimal tolerance)
-#     if sp_content and primary_value is not None:
-#         # Try extended print first (EDA calc_type)
-#         sp_cds_extended = parse_smd_cds_extended_print(sp_content)
-#         if sp_cds_extended is not None:
-#             validation_info["sp_extended_match"] = abs(primary_value - sp_cds_extended) <= 0.001
-#             validation_info["sp_extended_diff"] = abs(primary_value - sp_cds_extended)
-#             if not validation_info["sp_extended_match"]:
-#                 logging.warning(f"CDS validation failed (SP extended): opt={primary_value:.3f}, sp_extended={sp_cds_extended:.3f} kcal/mol")
-        
-#         # Try detail block (regular SP)
-#         elif sp_detail_data := parse_smd_detail_block(sp_content):
-#             if "cds_detail_final" in sp_detail_data:
-#                 sp_val = sp_detail_data["cds_detail_final"]
-#                 validation_info["sp_detail_match"] = abs(primary_value - sp_val) <= 0.001
-#                 validation_info["sp_detail_diff"] = abs(primary_value - sp_val)
-#                 if not validation_info["sp_detail_match"]:
-#                     logging.warning(f"CDS validation failed (SP detail): opt={primary_value:.3f}, sp_detail={sp_val:.3f} kcal/mol")
-    
-#     if primary_value is None:
-#         return None
-    
-#     # Return consolidated result with OPT-derived CDS for SP calculations
-#     result = {
-#         "G_CDS (Ha)": cds_hartree,
-#         "G_CDS (kcal/mol)": primary_value,
-#     }
-#     result.update(validation_info)
-#     return result
 
 
 def apply_thermodynamic_corrections(data: Dict[str, Any], opt_content: str) -> None:
