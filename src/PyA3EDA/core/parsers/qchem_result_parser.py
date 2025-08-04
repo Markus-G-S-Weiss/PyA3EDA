@@ -110,33 +110,33 @@ def extract_with_pattern(content: str, primary_pattern: Pattern, fallback_patter
 # PURE PARSING FUNCTIONS - Each function parses one specific data type
 
 
-def parse_final_energy(content: str) -> Optional[Dict[str, Any]]:
+def parse_final_energy(content: str, prefix: str = "E") -> Optional[Dict[str, Any]]:
     """Parse final energy from OPT calculations (Final energy is pattern)."""
     result, _ = extract_with_pattern(content, PATTERNS["final_energy"], default_unit="Ha")
     
     if result is not None:
         energy_value, energy_unit = result
         return {
-            f"E ({energy_unit})": energy_value,
-            "E (kcal/mol)": convert_energy_unit(energy_value, energy_unit, "kcal/mol")
+            f"{prefix} ({energy_unit})": energy_value,
+            f"{prefix} (kcal/mol)": convert_energy_unit(energy_value, energy_unit, "kcal/mol")
         }
     return None
 
 
-def parse_total_energy(content: str) -> Optional[Dict[str, Any]]:
+def parse_total_energy(content: str, prefix: str = "E") -> Optional[Dict[str, Any]]:
     """Parse total energy from SP calculations (Total energy = pattern)."""
     result, _ = extract_with_pattern(content, PATTERNS["total_energy"], default_unit="Ha")
     
     if result is not None:
         energy_value, energy_unit = result
         return {
-            f"E ({energy_unit})": energy_value,
-            "E (kcal/mol)": convert_energy_unit(energy_value, energy_unit, "kcal/mol")
+            f"{prefix} ({energy_unit})": energy_value,
+            f"{prefix} (kcal/mol)": convert_energy_unit(energy_value, energy_unit, "kcal/mol")
         }
     return None
 
 
-def parse_energy(content: str) -> Optional[Dict[str, Any]]:
+def parse_energy(content: str, prefix: str = "E") -> Optional[Dict[str, Any]]:
     """Parse energy with fallback - tries final energy first, then total energy."""
     result, fallback_used = extract_with_pattern(
         content, PATTERNS["final_energy"], PATTERNS["total_energy"], default_unit="Ha")
@@ -144,8 +144,8 @@ def parse_energy(content: str) -> Optional[Dict[str, Any]]:
     if result is not None:
         energy_value, energy_unit = result
         return {
-            f"E ({energy_unit})": energy_value,
-            "E (kcal/mol)": convert_energy_unit(energy_value, energy_unit, "kcal/mol"),
+            f"{prefix} ({energy_unit})": energy_value,
+            f"{prefix} (kcal/mol)": convert_energy_unit(energy_value, energy_unit, "kcal/mol"),
             "energy_fallback_used": fallback_used
         }
     return None

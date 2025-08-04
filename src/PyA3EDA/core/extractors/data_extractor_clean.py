@@ -187,7 +187,7 @@ def extract_opt_thermodynamic_data(content: str) -> Dict[str, Any]:
     """Extract thermodynamic data from OPT calculation."""
     data = {}
     
-    # Basic energy extraction - parse_energy returns a dictionary
+    # Basic energy extraction - parse_energy returns a dictionary with default prefix (keeps "E")
     energy_data = parse_energy(content)
     if energy_data:
         data.update(energy_data)
@@ -359,13 +359,13 @@ def _extract_regular_sp(sp_content: str, opt_content: str = None) -> Dict[str, A
     """Extract energy from regular SP calculation (eda2 = 0)."""
     data = {}
     
-    # Extract total energy using the dedicated parser
-    energy_data = parse_total_energy(sp_content)
+    # Extract total energy with SP prefix
+    energy_data = parse_total_energy(sp_content, prefix="SP_E")
     if not energy_data:
         logging.warning("Failed to extract total energy from regular SP calculation")
         return {}
     
-    data.update(energy_data)
+    data.update(energy_data)  # Will contain "SP_E (Ha)" and "SP_E (kcal/mol)"
     
     # Extract SMD detail block
     if smd_data := extract_smd_detail_block_data(sp_content):
