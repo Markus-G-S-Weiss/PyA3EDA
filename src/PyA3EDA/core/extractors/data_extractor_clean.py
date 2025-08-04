@@ -223,19 +223,18 @@ def extract_opt_thermodynamic_data(content: str) -> Dict[str, Any]:
 
 
 def extract_sp_thermodynamic_data(sp_content: str, metadata: Dict[str, Any], opt_content: str = None) -> Dict[str, Any]:
-    """Extract thermodynamic data from SP calculation with clean logic based on eda2 type."""
+    """Extract thermodynamic data from SP calculation based on calc_type presence."""
     data = {}
     
-    # Get eda2 type from metadata - determines extraction strategy
-    eda2 = metadata.get("eda2", "0")
+    # Determine extraction strategy based on calc_type presence
+    calc_type = metadata.get("Calc_Type", "").strip()
     
-    if eda2 == "0":
-        # Regular SP calculation - extract total energy and SMD data
+    if not calc_type:
+        # No calc_type = Regular SP calculation
         data = _extract_regular_sp(sp_content, opt_content)
     else:
-        # EDA calculation - extract based on calc_type
-        calc_type = metadata.get("Calc_Type", "").lower()
-        data = _extract_eda_sp(sp_content, calc_type, metadata, opt_content)
+        # Has calc_type = EDA calculation
+        data = _extract_eda_sp(sp_content, calc_type.lower(), metadata, opt_content)
     
     if not data:
         return {}
@@ -392,9 +391,9 @@ def _extract_eda_sp(sp_content: str, calc_type: str, metadata: Dict[str, Any], o
         return {}
     
     # Start with base energy
-    final_energy_ha = base_energy_ha
-    final_energy_kcal = convert_energy_unit(base_energy_ha, "Ha", "kcal/mol")
-    
+    final_energy_ha = base_energy_ha["SP_E (Ha)"]
+    final_energy_kcal = convert_energy_unit(final_energy_ha, "Ha", "kcal/mol")
+
     # Apply SMD CDS correction if solvent is used - simplified validation logic
     sp_solvent = metadata.get("SP_Solvent", "gas").lower()
     if sp_solvent == "smd":
@@ -421,7 +420,7 @@ def _extract_eda_sp(sp_content: str, calc_type: str, metadata: Dict[str, Any], o
     if calc_type in ["pol_cat", "full_cat"]:
         bsse_data = parse_bsse_energy(sp_content)
         if bsse_data:
-            bsse_kj = bsse_data["bsse_energy"]
+            bsse_kj = bsse_data["bsse_energy (kJ/mol)"]
             bsse_ha = convert_energy_unit(bsse_kj, "kJ/mol", "Ha")
             bsse_kcal = convert_energy_unit(bsse_kj, "kJ/mol", "kcal/mol")
             

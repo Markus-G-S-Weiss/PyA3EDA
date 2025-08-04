@@ -248,19 +248,43 @@ def parse_smd_cds_extended_print(content: str) -> Optional[float]:
     return cds_value if cds_value is not None else None
 
 
-def parse_eda_polarized_energy(content: str) -> Optional[Dict[str, Any]]:
+def parse_eda_polarized_energy(content: str, prefix: str = "SP_E") -> Optional[Dict[str, Any]]:
     """Parse polarized energy from EDA SP calculations (frz/pol types)."""
-    result, _ = extract_with_pattern(content, PATTERNS["eda_polarized_energy"], field_mapping={1: "polarized_energy"})
-    return {"polarized_energy": result["polarized_energy"]} if result else None
+    result, _ = extract_with_pattern(content, PATTERNS["eda_polarized_energy"], default_unit="Ha")
+    
+    if result is not None:
+        # Assume it's a single float value in Hartree
+        energy_value = result if isinstance(result, (int, float)) else result[0]
+        return {
+            f"{prefix} (Ha)": energy_value,
+            f"{prefix} (kcal/mol)": convert_energy_unit(energy_value, "Ha", "kcal/mol")
+        }
+    return None
 
 
-def parse_eda_convergence_energy(content: str) -> Optional[Dict[str, Any]]:
-    """Parse convergence criterion energy from EDA SP calculations (full type)."""
-    result, _ = extract_with_pattern(content, PATTERNS["eda_convergence_energy"], field_mapping={1: "convergence_energy"})
-    return {"convergence_energy": result["convergence_energy"]} if result else None
+def parse_eda_convergence_energy(content: str, prefix: str = "SP_E") -> Optional[Dict[str, Any]]:
+    """Parse full energy from EDA SP calculations (full type)."""
+    result, _ = extract_with_pattern(content, PATTERNS["eda_convergence_energy"], default_unit="Ha")
+    
+    if result is not None:
+        # Assume it's a single float value in Hartree
+        energy_value = result if isinstance(result, (int, float)) else result[0]
+        return {
+            f"{prefix} (Ha)": energy_value,
+            f"{prefix} (kcal/mol)": convert_energy_unit(energy_value, "Ha", "kcal/mol")
+        }
+    return None
 
 
 def parse_bsse_energy(content: str) -> Optional[Dict[str, Any]]:
     """Parse BSSE energy from EDA SP calculations (full type correction)."""
-    result, _ = extract_with_pattern(content, PATTERNS["bsse_energy"], field_mapping={1: "bsse_energy"})
-    return {"bsse_energy": result["bsse_energy"]} if result else None
+    result, _ = extract_with_pattern(content, PATTERNS["bsse_energy"], default_unit="kJ/mol")
+
+    if result is not None:
+        # Assume it's a single float value in kJ/mol
+        energy_value = result if isinstance(result, (int, float)) else result[0]
+        return {
+            "bsse_energy (kJ/mol)": energy_value,
+            "bsse_energy (kcal/mol)": convert_energy_unit(energy_value, "kJ/mol", "kcal/mol")
+        }
+    return None
