@@ -379,9 +379,9 @@ def _extract_eda_sp(sp_content: str, calc_type: str, metadata: Dict[str, Any], o
     data = {}
     
     # Determine EDA type and extract base energy
-    if calc_type in ["frz", "pol"]:
+    if calc_type in ["frz_cat", "pol_cat"]:
         base_energy_ha = parse_eda_polarized_energy(sp_content)
-    elif calc_type == "full":
+    elif calc_type == "full_cat":
         base_energy_ha = parse_eda_convergence_energy(sp_content)
     else:
         logging.warning(f"Unknown EDA calc_type: {calc_type}")
@@ -416,9 +416,9 @@ def _extract_eda_sp(sp_content: str, calc_type: str, metadata: Dict[str, Any], o
             # Apply CDS correction to final energy
             final_energy_ha += sp_cds_ha
             final_energy_kcal += sp_cds_kcal
-    
-    # Apply BSSE correction for pol and full
-    if calc_type in ["pol", "full"]:
+
+    # Apply BSSE correction for pol_cat and full_cat
+    if calc_type in ["pol_cat", "full_cat"]:
         bsse_data = parse_bsse_energy(sp_content)
         if bsse_data:
             bsse_kj = bsse_data["bsse_energy"]
