@@ -216,9 +216,9 @@ def extract_opt_thermodynamic_data(content: str) -> Dict[str, Any]:
     if opt_status := parse_optimization_status(content):
         data.update(opt_status)
     
-    # Calculate derived values
-    calculate_derived_values(data)
-    
+    # Calculate derived values for OPT data
+    calculate_enthalpy_and_gibbs(data, mode="opt")
+
     return data
 
 
@@ -243,8 +243,8 @@ def extract_sp_thermodynamic_data(sp_content: str, metadata: Dict[str, Any], opt
     if opt_content:
         apply_thermodynamic_corrections(data, opt_content)
     
-    # Calculate derived values
-    calculate_derived_values(data)
+    # Calculate derived values for SP data
+    calculate_enthalpy_and_gibbs(data, mode="sp")
     
     return data
 
@@ -262,10 +262,11 @@ def extract_smd_detail_block_data(content: str) -> Dict[str, Any]:
         return data
     
     # Extract G_S and G_ENP components (both in Hartree from parser)
-    if "g_s_final" in smd_data and "g_enp_final" in smd_data:
+    if "g_s_final" in smd_data and "g_enp_final" in smd_data and "cds_detail_final" in smd_data:
         g_s_ha = smd_data["g_s_final"]
         g_enp_ha = smd_data["g_enp_final"]
         g_cds_ha = g_s_ha - g_enp_ha  # Calculate CDS difference
+        g_cds_detail_kcal = smd_data["cds_detail_final"]
         
         data.update({
             "G_S (Ha)": g_s_ha,
@@ -273,7 +274,7 @@ def extract_smd_detail_block_data(content: str) -> Dict[str, Any]:
             "G_ENP (Ha)": g_enp_ha,
             "G_ENP (kcal/mol)": convert_energy_unit(g_enp_ha, "Ha", "kcal/mol"),
             "G_CDS (Ha)": g_cds_ha,
-            "G_CDS (kcal/mol)": convert_energy_unit(g_cds_ha, "Ha", "kcal/mol")
+            "G_CDS (kcal/mol)": g_cds_detail_kcal
         })
     
     return data
@@ -289,7 +290,7 @@ def extract_cds_extended_print(sp_content: str) -> Dict[str, Any]:
     # Extract CDS from SP extended print pattern
     sp_cds_kcal = parse_smd_cds_extended_print(sp_content)
     if sp_cds_kcal is None:
-        logging.warning("Failed to extract CDS from SP extended print")
+        logging.warning("Failed to extract CDS from SP extended print. Use print=2 in smx block.")
         return {}
     
     # Convert to Hartree and prepare data
@@ -459,10 +460,16 @@ def apply_thermodynamic_corrections(data: Dict[str, Any], opt_content: str) -> N
         data.update(zpe_data)
 
 
-def calculate_derived_values(data: Dict[str, Any]) -> None:
-    """Calculate derived thermodynamic values (H and G) in place."""
-    # Determine base energy key
-    base_energy_key = "SP_E (kcal/mol)" if "SP_E (kcal/mol)" in data else "E (kcal/mol)"
+def calculate_enthalpy_and_gibbs(data: Dict[str, Any], mode: str) -> None:
+    """
+    Calculate derived thermodynamic values (H and G) in place.
+    
+    Args:
+        data: Dictionary containing energy and thermodynamic correction data
+        is_sp: True if this is SP data (use SP_E), False if OPT data (use E)
+    """
+    # Determine base energy key based on calculation type
+    base_energy_key = "SP_E (kcal/mol)" if mode == "sp" else "E (kcal/mol)"
     
     # Calculate H (kcal/mol)
     if base_energy_key in data and "Total Enthalpy Corr. (kcal/mol)" in data:
