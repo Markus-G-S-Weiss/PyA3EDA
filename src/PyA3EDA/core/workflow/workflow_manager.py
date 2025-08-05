@@ -53,7 +53,7 @@ class WorkflowManager:
         """
         Extract and export data.
         """
-        from PyA3EDA.core.extractors.data_extractor_clean import extract_all_data
+        from PyA3EDA.core.extractors.data_extractor import extract_all_data
         
         criteria = getattr(self.args, 'extract', None) if self.args else "SUCCESSFUL"
         
