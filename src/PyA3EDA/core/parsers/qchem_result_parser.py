@@ -25,11 +25,11 @@ PATTERNS = {
     "total_enthalpy_fallback": re.compile(r"Total Enthalpy:\s+([-+]?\d+\.\d+)\s+([A-Za-z][A-Za-z0-9./\-]*)", re.MULTILINE),
     "qrrho_total_entropy": re.compile(r"QRRHO-Total Entropy:\s+([-+]?\d+\.\d+)\s+([A-Za-z][A-Za-z0-9./\-]*)", re.MULTILINE),
     "total_entropy_fallback": re.compile(r"Total Entropy:\s+([-+]?\d+\.\d+)\s+([A-Za-z][A-Za-z0-9./\-]*)", re.MULTILINE),
-    # SMD CDS energy patterns
-    "smd_g_enp": re.compile(r"\(3\)\s+G-ENP\(liq\) elect-nuc-pol free energy of system\s+([-+]?\d+\.\d+)\s+a\.u\.", re.MULTILINE),
-    "smd_g_s": re.compile(r"\(6\)\s+G-S\(liq\) free energy of system\s+([-+]?\d+\.\d+)\s+a\.u\.", re.MULTILINE),
-    "smd_cds_detail": re.compile(r"\(4\)\s+G-CDS\(liq\) cavity-dispersion-solvent structure\s+([-+]?\d+\.\d+)\s+kcal/mol", re.MULTILINE),
-    "smd_cds_summary": re.compile(r"G_CDS\s+=\s+([-+]?\d+\.\d+)\s+kcal/mol", re.MULTILINE),
+    # SMD CDS energy patterns - capture values with units from detailed block
+    "smd_g_enp": re.compile(r"\(3\)\s+G-ENP\(liq\) elect-nuc-pol free energy of system\s+([-+]?\d+\.\d+)\s+(a\.u\.)", re.MULTILINE),
+    "smd_g_s": re.compile(r"\(6\)\s+G-S\(liq\) free energy of system\s+([-+]?\d+\.\d+)\s+(a\.u\.)", re.MULTILINE),
+    "smd_cds_detail": re.compile(r"\(4\)\s+G-CDS\(liq\) cavity-dispersion-solvent structure\s+([-+]?\d+\.\d+)\s+(kcal/mol)", re.MULTILINE),
+    "smd_cds_summary": re.compile(r"G_CDS\s+=\s+([-+]?\d+\.\d+)\s+(kcal/mol)", re.MULTILINE),
     "smd_cds_extended_print": re.compile(r"Total:\s+([-+]?\d+\.\d+)\s*\n\s*-+", re.MULTILINE),
     # EDA-specific patterns
     "eda_polarized_energy": re.compile(r"Energy prior to optimization \(guess energy\)\s*=\s*([-+]?\d+\.\d+)", re.MULTILINE),
@@ -216,23 +216,39 @@ def parse_zero_point_energy(content: str) -> Optional[Dict[str, Any]]:
 def parse_smd_detail_block(content: str) -> Optional[Dict[str, Any]]:
     """
     Parse SMD detailed energy components from Q-Chem output (OPT and regular SP files).
-    Extracts G-ENP, G-S, and detailed G-CDS values from the detailed SMD block.
+    Extracts G-ENP, G-S, and detailed G-CDS values from the detailed SMD block with units.
     """
     result = {}
     
-    # Extract G-ENP (Hartree)
-    g_enp_value, _ = extract_with_pattern(content, PATTERNS["smd_g_enp"])
-    if g_enp_value is not None:
+    # Extract G-ENP with unit (a.u.) - consistent with other parsers
+    g_enp_result, _ = extract_with_pattern(content, PATTERNS["smd_g_enp"], default_unit="Ha")
+    if g_enp_result is not None:
+        if isinstance(g_enp_result, tuple):
+            g_enp_value, g_enp_unit = g_enp_result
+            # Convert a.u. to Ha for consistency
+            g_enp_unit = "Ha" if g_enp_unit == "a.u." else g_enp_unit
+        else:
+            g_enp_value, g_enp_unit = g_enp_result, "Ha"
         result["g_enp_final"] = g_enp_value
     
-    # Extract G-S (Hartree)  
-    g_s_value, _ = extract_with_pattern(content, PATTERNS["smd_g_s"])
-    if g_s_value is not None:
+    # Extract G-S with unit (a.u.) - consistent with other parsers
+    g_s_result, _ = extract_with_pattern(content, PATTERNS["smd_g_s"], default_unit="Ha")
+    if g_s_result is not None:
+        if isinstance(g_s_result, tuple):
+            g_s_value, g_s_unit = g_s_result
+            # Convert a.u. to Ha for consistency
+            g_s_unit = "Ha" if g_s_unit == "a.u." else g_s_unit
+        else:
+            g_s_value, g_s_unit = g_s_result, "Ha"
         result["g_s_final"] = g_s_value
         
-    # Extract detailed CDS (kcal/mol)
-    cds_detail_value, _ = extract_with_pattern(content, PATTERNS["smd_cds_detail"])
-    if cds_detail_value is not None:
+    # Extract detailed CDS with unit (kcal/mol) - consistent with other parsers
+    cds_detail_result, _ = extract_with_pattern(content, PATTERNS["smd_cds_detail"], default_unit="kcal/mol")
+    if cds_detail_result is not None:
+        if isinstance(cds_detail_result, tuple):
+            cds_detail_value, cds_detail_unit = cds_detail_result
+        else:
+            cds_detail_value, cds_detail_unit = cds_detail_result, "kcal/mol"
         result["cds_detail_final"] = cds_detail_value
     
     return result if result else None

@@ -531,10 +531,13 @@ def extract_all_data(config_manager, system_dir: Path, criteria: str = "SUCCESSF
             if opt_result:
                 opt_data.append(opt_result)
                 
-                # Cache OPT content for SP corrections
+                # Cache OPT content for SP corrections with enhanced key
                 opt_content = read_text(output_path)
                 if opt_content:
-                    opt_content_cache[metadata.get("Species", "unknown")] = opt_content
+                    # Create comprehensive cache key: Species|Branch|Calc_Type
+                    cache_key = f"{metadata.get('Species', 'unknown')}|{metadata.get('Branch', 'unknown')}|{metadata.get('Calc_Type', 'unknown')}"
+                    opt_content_cache[cache_key] = opt_content
+                    logging.debug(f"Caching OPT with key: {cache_key}")
                     
             # Extract XYZ data separately
             xyz_result = extract_xyz_data(output_path, metadata, criteria)
@@ -551,9 +554,17 @@ def extract_all_data(config_manager, system_dir: Path, criteria: str = "SUCCESSF
                 logging.debug(f"Skipping SP file {reason}: {input_path}")
                 continue
             
-            # Get corresponding OPT content for corrections
-            species = metadata.get("Species", "unknown")
-            opt_content = opt_content_cache.get(species)
+            # Get corresponding OPT content for corrections using enhanced key
+            # Create matching cache key: Species|Branch|Calc_Type
+            cache_key = f"{metadata.get('Species', 'unknown')}|{metadata.get('Branch', 'unknown')}|{metadata.get('Calc_Type', 'unknown')}"
+            opt_content = opt_content_cache.get(cache_key)
+            
+            logging.debug(f"SP file looking for OPT key: {cache_key}")
+            if not opt_content:
+                logging.warning(f"No matching OPT found for SP {cache_key}")
+                logging.debug(f"Available OPT keys in cache: {list(opt_content_cache.keys())}")
+            else:
+                logging.debug(f"Found matching OPT for SP {cache_key}")
             
             sp_result = extract_sp_data(output_path, metadata, criteria, opt_content)
             if sp_result:
