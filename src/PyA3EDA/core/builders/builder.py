@@ -656,6 +656,28 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
             if method["name"].get("sp_enabled", False) and bs.get("sp_enabled", False):
                 opt_groups[opt_key]["sp_configs"].append({"method": method, "bs": bs})
 
+    # Helper to process OPT file followed by all corresponding SP files for a species
+    def process_opt_and_sp_for_species(category, branch, species, calc_type="", 
+                                     catalyst_name="", template_prefix="", molecule_fn=None):
+        """Helper to process OPT file followed by all corresponding SP files for a species."""
+        for opt_key, group in opt_groups.items():
+            # Process OPT first
+            result = process_file(
+                group["opt_method"], group["opt_bs"], "opt", category, branch, species,
+                calc_type, catalyst_name, template_prefix, molecule_fn
+            )
+            if mode == "yield" and result:
+                yield result
+            
+            # Then process all SP files for this OPT
+            for sp_config in group["sp_configs"]:
+                result = process_file(
+                    sp_config["method"], sp_config["bs"], "sp", category, branch, species,
+                    calc_type, catalyst_name, template_prefix, molecule_fn
+                )
+                if mode == "yield" and result:
+                    yield result
+
     # Process each species type with OPT-first-then-SP order
     for category, branch, species_list, species_fn in [
         ("no_cat", "reactants", processed_config.get("reactants", []), lambda r: r["name"]["opt"]),
@@ -664,130 +686,63 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
     ]:
         for species_data in species_list:
             species = species_fn(species_data)
-            
-            # Process OPT first
-            for opt_key, group in opt_groups.items():
-                result = process_file(
-                    group["opt_method"], group["opt_bs"], "opt", category, branch, species,
-                    molecule_fn=build_standard_molecule_section
-                )
-                if mode == "yield" and result:
-                    yield result
-                
-                # Then process all SP files for this OPT
-                for sp_config in group["sp_configs"]:
-                    result = process_file(
-                        sp_config["method"], sp_config["bs"], "sp", category, branch, species,
-                        molecule_fn=build_standard_molecule_section
-                    )
-                    if mode == "yield" and result:
-                        yield result
-    
+            yield from process_opt_and_sp_for_species(
+                category, branch, species, molecule_fn=build_standard_molecule_section
+            )
+
     # Process reactant combinations
     reactants_incl = [r for r in processed_config.get("reactants", []) if r.get("include", True)]
     if len(reactants_incl) > 1:
         for combo in get_combinations(reactants_incl, min_length=2):
-            for opt_key, group in opt_groups.items():
-                result = process_file(
-                    group["opt_method"], group["opt_bs"], "opt", "no_cat", "reactants", combo,
-                    molecule_fn=build_standard_molecule_section
-                )
-                if mode == "yield" and result:
-                    yield result
-                
-                for sp_config in group["sp_configs"]:
-                    result = process_file(
-                        sp_config["method"], sp_config["bs"], "sp", "no_cat", "reactants", combo,
-                        molecule_fn=build_standard_molecule_section
-                    )
-                    if mode == "yield" and result:
-                        yield result
+            yield from process_opt_and_sp_for_species(
+                "no_cat", "reactants", combo, molecule_fn=build_standard_molecule_section
+            )
+
+    # # Process product combinations (commented out - uncomment if needed for completeness)
+    # products_incl = [p for p in processed_config.get("products", []) if p.get("include", True)]
+    # if len(products_incl) > 1:
+    #     for combo in get_combinations(products_incl, min_length=2):
+    #         yield from process_opt_and_sp_for_species(
+    #             "no_cat", "products", combo, molecule_fn=build_standard_molecule_section
+    #         )
 
     # Process catalysts
     for catalyst in processed_config.get("catalysts", []):
         cat_name = catalyst["name"]["opt"]
         
         # Catalyst itself
-        for opt_key, group in opt_groups.items():
-            result = process_file(
-                group["opt_method"], group["opt_bs"], "opt", "cat", "cat", cat_name,
-                catalyst_name=cat_name, molecule_fn=build_standard_molecule_section
-            )
-            if mode == "yield" and result:
-                yield result
-            
-            for sp_config in group["sp_configs"]:
-                result = process_file(
-                    sp_config["method"], sp_config["bs"], "sp", "cat", "cat", cat_name,
-                    catalyst_name=cat_name, molecule_fn=build_standard_molecule_section
-                )
-                if mode == "yield" and result:
-                    yield result
+        yield from process_opt_and_sp_for_species(
+            "cat", "cat", cat_name, catalyst_name=cat_name, 
+            molecule_fn=build_standard_molecule_section
+        )
         
         # preTS: catalyst with reactants
         for combo in get_combinations(reactants_incl, min_length=1):
             species_combo = f"{cat_name}-{combo}"
             for calc_type in ("full_cat", "pol_cat", "frz_cat"):
-                for opt_key, group in opt_groups.items():
-                    result = process_file(
-                        group["opt_method"], group["opt_bs"], "opt", "cat", "preTS", species_combo,
-                        calc_type=calc_type, catalyst_name=cat_name, template_prefix="preTS_",
-                        molecule_fn=build_fragmented_molecule_section
-                    )
-                    if mode == "yield" and result:
-                        yield result
-                    
-                    for sp_config in group["sp_configs"]:
-                        result = process_file(
-                            sp_config["method"], sp_config["bs"], "sp", "cat", "preTS", species_combo,
-                            calc_type=calc_type, catalyst_name=cat_name, template_prefix="preTS_",
-                            molecule_fn=build_fragmented_molecule_section
-                        )
-                        if mode == "yield" and result:
-                            yield result
+                yield from process_opt_and_sp_for_species(
+                    "cat", "preTS", species_combo, calc_type=calc_type, 
+                    catalyst_name=cat_name, template_prefix="preTS_",
+                    molecule_fn=build_fragmented_molecule_section
+                )
         
         # postTS: catalyst with products  
         products_incl = [p for p in processed_config.get("products", []) if p.get("include", True)]
         for combo in get_combinations(products_incl, min_length=1):
             species_combo = f"{cat_name}-{combo}"
             for calc_type in ("full_cat", "pol_cat", "frz_cat"):
-                for opt_key, group in opt_groups.items():
-                    result = process_file(
-                        group["opt_method"], group["opt_bs"], "opt", "cat", "postTS", species_combo,
-                        calc_type=calc_type, catalyst_name=cat_name, template_prefix="postTS_",
-                        molecule_fn=build_fragmented_molecule_section
-                    )
-                    if mode == "yield" and result:
-                        yield result
-                    
-                    for sp_config in group["sp_configs"]:
-                        result = process_file(
-                            sp_config["method"], sp_config["bs"], "sp", "cat", "postTS", species_combo,
-                            calc_type=calc_type, catalyst_name=cat_name, template_prefix="postTS_",
-                            molecule_fn=build_fragmented_molecule_section
-                        )
-                        if mode == "yield" and result:
-                            yield result
+                yield from process_opt_and_sp_for_species(
+                    "cat", "postTS", species_combo, calc_type=calc_type,
+                    catalyst_name=cat_name, template_prefix="postTS_",
+                    molecule_fn=build_fragmented_molecule_section
+                )
         
         # TS: Catalyst TS
         for calc_type in ("full_cat", "pol_cat", "frz_cat"):
-            for opt_key, group in opt_groups.items():
-                result = process_file(
-                    group["opt_method"], group["opt_bs"], "opt", "cat", "ts", f"ts_{cat_name}-tscomplex",
-                    calc_type=calc_type, catalyst_name=cat_name,
-                    molecule_fn=build_fragmented_molecule_section
-                )
-                if mode == "yield" and result:
-                    yield result
-                
-                for sp_config in group["sp_configs"]:
-                    result = process_file(
-                        sp_config["method"], sp_config["bs"], "sp", "cat", "ts", f"ts_{cat_name}-tscomplex",
-                        calc_type=calc_type, catalyst_name=cat_name,
-                        molecule_fn=build_fragmented_molecule_section
-                    )
-                    if mode == "yield" and result:
-                        yield result
+            yield from process_opt_and_sp_for_species(
+                "cat", "ts", f"ts_{cat_name}-tscomplex", calc_type=calc_type,
+                catalyst_name=cat_name, molecule_fn=build_fragmented_molecule_section
+            )
 
     if mode == "generate":
         logging.info("Input file generation completed.")
