@@ -466,7 +466,7 @@ def calculate_enthalpy_and_gibbs(data: Dict[str, Any], mode: str) -> None:
     
     Args:
         data: Dictionary containing energy and thermodynamic correction data
-        is_sp: True if this is SP data (use SP_E), False if OPT data (use E)
+        mode: Calculation mode - "sp" uses SP_E, "opt" uses E
     """
     # Determine base energy key based on calculation type
     base_energy_key = "SP_E (kcal/mol)" if mode == "sp" else "E (kcal/mol)"
