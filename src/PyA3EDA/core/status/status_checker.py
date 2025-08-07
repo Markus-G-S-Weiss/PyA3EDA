@@ -251,15 +251,19 @@ def print_group_status(group_key: str, path_items: List, system_dir: Path) -> Di
     return group_counts
 
 
-def check_all_statuses(config: dict, system_dir: Path) -> None:
+def check_all_statuses(config_manager, system_dir: Path) -> None:
     """
     Iterates over expected input paths (grouped by method_basis), checks their statuses on the fly,
     prints a formatted report for each group along with an intermediate summary, and finally prints
     an overall status summary. Enhanced to show OPT convergence info when available.
+    
+    Args:
+        config_manager: ConfigManager instance or raw config dict
+        system_dir: Base system directory
     """
     logging.info(f"Status checking started:")
     # Use metadata for enhanced status reporting
-    path_items = list(iter_input_paths(config, system_dir, include_metadata=True))
+    path_items = list(iter_input_paths(config_manager, system_dir, include_metadata=True))
     if not path_items:
         logging.info("No input paths available for status checking.")
         return

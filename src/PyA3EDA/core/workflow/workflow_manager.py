@@ -36,7 +36,7 @@ class WorkflowManager:
         run_criteria = getattr(self.args, 'run', None) if self.args else None
         
         run_all_calculations(
-            self.config_manager.processed_config,
+            self.config_manager,
             self.system_dir,
             run_criteria
         )
@@ -47,7 +47,7 @@ class WorkflowManager:
         prints a formatted status report and summary.
         """
         from PyA3EDA.core.status.status_checker import check_all_statuses
-        check_all_statuses(self.config_manager.processed_config, self.system_dir)
+        check_all_statuses(self.config_manager, self.system_dir)
 
     def extract_data(self) -> None:
         """

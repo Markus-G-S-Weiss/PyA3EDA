@@ -489,7 +489,7 @@ def build_method_folder_name(method: str, basis: str, dispersion: str, solvent: 
 
 def create_file_metadata(method: dict, bs: dict, file_mode: str, category: str, 
                         branch: str, species: str, calc_type: str, catalyst_name: str,
-                        file_path: Path) -> dict:
+                        file_path: Path, config_manager=None) -> dict:
     """
     Create standardized metadata for a file.
     Centralized function to ensure consistency.
@@ -501,6 +501,16 @@ def create_file_metadata(method: dict, bs: dict, file_mode: str, category: str,
             method["dispersion"]["opt"],
             method["solvent"]["opt"]
         )
+        
+        # Get component lists from config manager if available
+        component_lists = {}
+        if config_manager:
+            config = config_manager.get_builder_config()
+            component_lists = {
+                "reactants": [r["name"]["opt"] for r in config.get("reactants", [])],
+                "products": [p["name"]["opt"] for p in config.get("products", [])], 
+                "catalysts": [c["name"]["opt"] for c in config.get("catalysts", [])]
+            }
         
         return {
             "Method": method["name"]["opt"],
@@ -515,7 +525,8 @@ def create_file_metadata(method: dict, bs: dict, file_mode: str, category: str,
             "Catalyst": catalyst_name,
             "Mode": file_mode,
             "eda2": method.get("eda2", "0"),  # Add EDA2 parameter for consistency
-            "Path": str(file_path)
+            "Path": str(file_path),
+            **component_lists  # Add component lists to metadata
         }
     else:  # sp
         base_method_combo = build_method_folder_name(
@@ -531,6 +542,16 @@ def create_file_metadata(method: dict, bs: dict, file_mode: str, category: str,
             method["dispersion"]["sp"],
             method["solvent"]["sp"]
         )
+        
+        # Get component lists from config manager if available
+        component_lists = {}
+        if config_manager:
+            config = config_manager.get_builder_config()
+            component_lists = {
+                "reactants": [r["name"]["opt"] for r in config.get("reactants", [])],
+                "products": [p["name"]["opt"] for p in config.get("products", [])], 
+                "catalysts": [c["name"]["opt"] for c in config.get("catalysts", [])]
+            }
         
         return {
             "Method": method["name"]["opt"],
@@ -550,7 +571,8 @@ def create_file_metadata(method: dict, bs: dict, file_mode: str, category: str,
             "Catalyst": catalyst_name,
             "Mode": file_mode,
             "eda2": method.get("eda2", "0"),  # Add EDA2 parameter for automatic detection
-            "Path": str(file_path)
+            "Path": str(file_path),
+            **component_lists  # Add component lists to metadata
         }
 
 
@@ -616,7 +638,7 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
         
         # Create metadata
         metadata = create_file_metadata(method, bs, file_mode, category, branch, 
-                                    species, calc_type, catalyst_name, file_path)
+                                    species, calc_type, catalyst_name, file_path, config_manager)
         
         # For yield mode, return path with metadata
         if mode == "yield":
@@ -756,7 +778,18 @@ def generate_all_inputs(config_manager, system_dir: Path, overwrite: str = None,
 def iter_input_paths(config, system_dir: Path, include_metadata: bool = False):
     """
     Iterate through all input file paths, optionally with metadata.
-    This function was missing and is needed by the data extractor.
+    
+    This function serves as the single source of truth for file discovery across
+    the PyA3EDA system, used by status checker, data extractor, and executor.
+    
+    Args:
+        config: ConfigManager instance with processed configuration
+        system_dir: Base system directory
+        include_metadata: Whether to include metadata with paths
+        
+    Yields:
+        Path objects (if include_metadata=False) or SimpleNamespace objects 
+        with 'path' and 'metadata' attributes (if include_metadata=True)
     """
     # Use the existing process_input_files function in yield mode
     for result in process_input_files(config, system_dir, mode="yield"):
@@ -764,4 +797,4 @@ def iter_input_paths(config, system_dir: Path, include_metadata: bool = False):
             if include_metadata:
                 yield result  # Return the full object with path and metadata
             else:
-                yield result.path if hasattr(result, 'path') else result
+                yield result.path  # Extract just the path
