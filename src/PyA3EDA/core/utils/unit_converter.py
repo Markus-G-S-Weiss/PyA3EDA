@@ -52,11 +52,11 @@ def convert_energy_unit(value: float, unit: str, target_unit: str = "kcal/mol") 
 
     # Handle kJ/mol to Hartree conversion
     if unit_lower in kjmol_units and target_lower in hartree_units:
-        return value / Constants.HARTREE_TO_KJMOL
+        return value * Constants.KJMOL_TO_HARTREE # Conversion factor for BSSE/eda correction
 
     # Handle kJ/mol to kcal/mol conversion
     if unit_lower in kjmol_units and target_lower in kcalmol_units:
-        return value * Constants.KJMOL_TO_KCALMOL
+        return value * Constants.KJMOL_TO_HARTREE * Constants.HARTREE_TO_KCALMOL # Conversion factor for BSSE/eda correction
     
     # Handle kcal/mol to kJ/mol conversion
     if unit_lower in kcalmol_units and target_lower in kjmol_units:

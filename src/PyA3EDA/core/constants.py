@@ -11,6 +11,7 @@ class Constants:
     HARTREE_TO_KJMOL = HARTREE_TO_KJ * AVOGADRO # Hartree to kJ/mol
     KJMOL_TO_KCALMOL = 1.0/4.184 # kJ/mol to kcal/mol
     HARTREE_TO_KCALMOL = HARTREE_TO_KJMOL * KJMOL_TO_KCALMOL # Hartree to kcal/mol
+    KJMOL_TO_HARTREE = 2625.5311584660003 # value for bsse conversion
     ESCAPE_MAP = {
         ' ': '-space-', '(': '-lparen-', ')': '-rparen-',
         '[': '-lbracket-', ']': '-rbracket-', '{': '-lbrace-', '}': '-rbrace-',
