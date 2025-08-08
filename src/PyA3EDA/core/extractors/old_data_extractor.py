@@ -585,7 +585,7 @@ def extract_and_export_method_combo(config_manager, method_combo_name: str, syst
         return {}
     
     # Import exporter functions
-    from PyA3EDA.core.exporters.data_exporter import write_opt_csv, write_sp_csv, write_xyz_files
+    from PyA3EDA.core.exporters.data_exporter import write_csv_data, write_xyz_files
     
     # Create structured output directories based on user specification:
     # results/raw/{method_combo_name}/
@@ -598,13 +598,13 @@ def extract_and_export_method_combo(config_manager, method_combo_name: str, syst
     # Export OPT data to method combo directory
     if combo_data["opt_data"]:
         opt_file_path = method_combo_dir / f"opt_{method_combo_name}.csv"
-        if write_opt_csv(combo_data["opt_data"], opt_file_path):
+        if write_csv_data(combo_data["opt_data"], opt_file_path, "OPT"):
             export_results["opt_csv"] = opt_file_path
             
     # Export SP data to method combo directory
     if combo_data["sp_data"]:
         sp_file_path = method_combo_dir / f"sp_{method_combo_name}.csv"
-        if write_sp_csv(combo_data["sp_data"], sp_file_path):
+        if write_csv_data(combo_data["sp_data"], sp_file_path, "SP"):
             export_results["sp_csv"] = sp_file_path
             
     # Export XYZ data to xyz_files subdirectory within method combo directory

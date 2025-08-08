@@ -2,9 +2,8 @@
 Data Exporter Module
 
 Pure file writers for direct CSV and XYZ export:
-- write_opt_csv: Write OPT data to CSV file
-- write_sp_csv: Write SP data to CSV file  
-- write_xyz_file: Write single XYZ coordinate file
+- write_csv_data: Generic CSV writer with configurable data type for logging
+- write_xyz_files: Write XYZ coordinate files
 """
 import logging
 import pandas as pd
@@ -14,19 +13,20 @@ from typing import Dict, List, Optional, Any
 from PyA3EDA.core.utils.file_utils import write_text
 
 
-def write_opt_csv(data_list: List[Dict[str, Any]], file_path: Path) -> bool:
+def write_csv_data(data_list: List[Dict[str, Any]], file_path: Path, data_type: str = "data") -> bool:
     """
-    Write OPT data to CSV file.
+    Write data to CSV file with generic data type support.
     
     Args:
-        data_list: List of OPT data dictionaries (CSV-ready)
+        data_list: List of data dictionaries (CSV-ready)
         file_path: Output CSV file path
+        data_type: Type of data for logging (e.g., "OPT", "SP", "profile")
         
     Returns:
         True if successful, False otherwise
     """
     if not data_list:
-        logging.warning("No OPT data to write")
+        logging.warning(f"No {data_type} data to write")
         return False
         
     try:
@@ -34,67 +34,11 @@ def write_opt_csv(data_list: List[Dict[str, Any]], file_path: Path) -> bool:
         df = pd.DataFrame(data_list)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(file_path, index=False)
-        logging.info(f"Saved {len(df)} OPT rows to {file_path}")
+        logging.info(f"Saved {len(df)} {data_type} rows to {file_path}")
         return True
         
     except Exception as e:
-        logging.error(f"Failed to write OPT CSV file {file_path}: {e}")
-        return False
-
-
-def write_sp_csv(data_list: List[Dict[str, Any]], file_path: Path) -> bool:
-    """
-    Write SP data to CSV file.
-    
-    Args:
-        data_list: List of SP data dictionaries (CSV-ready)
-        file_path: Output CSV file path
-        
-    Returns:
-        True if successful, False otherwise
-    """
-    if not data_list:
-        logging.warning("No SP data to write")
-        return False
-        
-    try:
-        # Create DataFrame and save directly
-        df = pd.DataFrame(data_list)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(file_path, index=False)
-        logging.info(f"Saved {len(df)} SP rows to {file_path}")
-        return True
-        
-    except Exception as e:
-        logging.error(f"Failed to write SP CSV file {file_path}: {e}")
-        return False
-
-
-def write_profile_csv(data_list: List[Dict[str, Any]], file_path: Path) -> bool:
-    """
-    Write profile data to CSV file.
-    
-    Args:
-        data_list: List of profile data dictionaries (CSV-ready)
-        file_path: Output CSV file path
-        
-    Returns:
-        True if successful, False otherwise
-    """
-    if not data_list:
-        logging.warning("No profile data to write")
-        return False
-        
-    try:
-        # Create DataFrame and save directly
-        df = pd.DataFrame(data_list)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(file_path, index=False)
-        logging.info(f"Saved {len(df)} profile rows to {file_path}")
-        return True
-        
-    except Exception as e:
-        logging.error(f"Failed to write profile CSV file {file_path}: {e}")
+        logging.error(f"Failed to write {data_type} CSV file {file_path}: {e}")
         return False
 
 
@@ -205,27 +149,28 @@ def export_all_combos(extracted_data: Dict[str, Dict[str, List[Dict[str, Any]]]]
                 if not combo_data.get(data_key):
                     continue
                 
-                # Get method combo name
+                # Get method combo name and data type
                 if calc_mode == "opt":
                     method_combo = combo_name
-                    writer_func = write_opt_csv
+                    data_type = "OPT"
                 else:  # sp
                     method_combo = combo_data[data_key][0].get("SP_Method_Combo", combo_name)
-                    writer_func = write_sp_csv
+                    data_type = "SP"
                 
                 # Export raw CSV
                 raw_file_path = raw_data_dir / f"{calc_mode}_{method_combo}.csv"
-                if writer_func(combo_data[data_key], raw_file_path):
+                if write_csv_data(combo_data[data_key], raw_file_path, data_type):
                     combo_files += 1
                 
                 # Export profiles (if enabled)
                 if enable_profiles:
-                    from PyA3EDA.core.extractors.profile_extractor import extract_profile_data
-                    catalyst_profiles = extract_profile_data(combo_data[data_key])
+                    from PyA3EDA.core.extractors.profile_extractor import ProfileExtractor
+                    extractor = ProfileExtractor(combo_data[data_key])
+                    catalyst_profiles = extractor.extract_profiles()
                     for catalyst, profile_data in catalyst_profiles.items():
                         if profile_data:
                             profile_path = profiles_dir / f"{calc_mode}_profile_{method_combo}_{catalyst}.csv"
-                            if write_profile_csv(profile_data, profile_path):
+                            if write_csv_data(profile_data, profile_path, "profile"):
                                 combo_files += 1
                     
             # Export XYZ data

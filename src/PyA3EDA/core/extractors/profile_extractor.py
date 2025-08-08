@@ -3,6 +3,10 @@ Clean Profile Extractor - DRY Metadata-Driven Approach
 
 Extract energy profiles using calculation-specific components from metadata.
 No name parsing - metadata is the single source of truth.
+
+Usage:
+    extractor = ProfileExtractor(raw_data_list)
+    profiles = extractor.extract_profiles()
 """
 from typing import Dict, List, Any, Optional
 
@@ -252,17 +256,3 @@ class ProfileExtractor:
                 profiles[catalyst] = catalyst_profile
         
         return profiles
-
-
-def extract_profile_data(raw_data_list: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Main function: Extract energy profiles from raw calculation data.
-    
-    Args:
-        raw_data_list: Raw calculation data with metadata
-        
-    Returns:
-        Dict mapping catalyst names to their energy profiles
-    """
-    extractor = ProfileExtractor(raw_data_list)
-    return extractor.extract_profiles()
