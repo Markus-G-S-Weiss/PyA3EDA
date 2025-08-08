@@ -70,6 +70,34 @@ def write_sp_csv(data_list: List[Dict[str, Any]], file_path: Path) -> bool:
         return False
 
 
+def write_profile_csv(data_list: List[Dict[str, Any]], file_path: Path) -> bool:
+    """
+    Write profile data to CSV file.
+    
+    Args:
+        data_list: List of profile data dictionaries (CSV-ready)
+        file_path: Output CSV file path
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if not data_list:
+        logging.warning("No profile data to write")
+        return False
+        
+    try:
+        # Create DataFrame and save directly
+        df = pd.DataFrame(data_list)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(file_path, index=False)
+        logging.info(f"Saved {len(df)} profile rows to {file_path}")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Failed to write profile CSV file {file_path}: {e}")
+        return False
+
+
 def write_xyz_files(data_list: List[Dict[str, Any]], output_dir: Path) -> Dict[str, Path]:
     """
     Write coordinate data to XYZ files.
@@ -132,19 +160,32 @@ def write_xyz_files(data_list: List[Dict[str, Any]], output_dir: Path) -> Dict[s
     return results
 
 
-def export_all_combos(extracted_data: Dict[str, Dict[str, List[Dict[str, Any]]]], output_dir: Path) -> None:
+def export_all_combos(extracted_data: Dict[str, Dict[str, List[Dict[str, Any]]]], base_dir: Path, enable_profiles: bool = False) -> None:
     """
-    Export all extracted method combo data to files.
+    Export all extracted method combo data to organized file structure.
     
     Args:
         extracted_data: Dictionary mapping method combo names to their extracted data
-        output_dir: Output directory for all exports
+        base_dir: Base directory where results will be exported
+        enable_profiles: Whether to extract and export energy profiles
+        
+    Creates directory structure:
+        base_dir/results/{method_combo}/
+        ├── raw_data/           # Raw extracted data CSV files
+        │   ├── opt_{opt_method_combo}.csv
+        │   └── sp_{sp_method_combo}.csv
+        ├── profiles/           # Energy profile CSV files per catalyst
+        │   ├── opt_profile_{catalyst}.csv
+        │   └── {sp_method_combo}_profile_{catalyst}.csv
+        └── xyz_files/          # XYZ coordinate files
     """
     if not extracted_data:
         logging.warning("No extracted data provided for export")
         return
     
-    logging.info(f"Exporting {len(extracted_data)} method combos to {output_dir}")
+    # Create results directory structure
+    results_dir = base_dir / "results"
+    logging.info(f"Exporting {len(extracted_data)} method combos to {results_dir}")
     
     total_files = 0
     
@@ -152,22 +193,40 @@ def export_all_combos(extracted_data: Dict[str, Dict[str, List[Dict[str, Any]]]]
     for combo_name, combo_data in extracted_data.items():
         try:
             # Create structured output directories
-            method_combo_dir = output_dir / "raw" / combo_name
+            method_combo_dir = results_dir / combo_name
+            raw_data_dir = method_combo_dir / "raw_data"
+            profiles_dir = method_combo_dir / "profiles"
             xyz_dir = method_combo_dir / "xyz_files"
             
             combo_files = 0
-            
-            # Export OPT data
-            if combo_data.get("opt_data"):
-                opt_file_path = method_combo_dir / f"opt_{combo_name}.csv"
-                if write_opt_csv(combo_data["opt_data"], opt_file_path):
+            # Export raw data and profiles for all calculation modes
+            for calc_mode in ["opt", "sp"]:
+                data_key = f"{calc_mode}_data"
+                if not combo_data.get(data_key):
+                    continue
+                
+                # Get method combo name
+                if calc_mode == "opt":
+                    method_combo = combo_name
+                    writer_func = write_opt_csv
+                else:  # sp
+                    method_combo = combo_data[data_key][0].get("SP_Method_Combo", combo_name)
+                    writer_func = write_sp_csv
+                
+                # Export raw CSV
+                raw_file_path = raw_data_dir / f"{calc_mode}_{method_combo}.csv"
+                if writer_func(combo_data[data_key], raw_file_path):
                     combo_files += 1
-                    
-            # Export SP data
-            if combo_data.get("sp_data"):
-                sp_file_path = method_combo_dir / f"sp_{combo_name}.csv"
-                if write_sp_csv(combo_data["sp_data"], sp_file_path):
-                    combo_files += 1
+                
+                # Export profiles (if enabled)
+                if enable_profiles:
+                    from PyA3EDA.core.extractors.profile_extractor import extract_profile_data
+                    catalyst_profiles = extract_profile_data(combo_data[data_key])
+                    for catalyst, profile_data in catalyst_profiles.items():
+                        if profile_data:
+                            profile_path = profiles_dir / f"{calc_mode}_profile_{method_combo}_{catalyst}.csv"
+                            if write_profile_csv(profile_data, profile_path):
+                                combo_files += 1
                     
             # Export XYZ data
             if combo_data.get("xyz_data"):
