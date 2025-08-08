@@ -487,93 +487,134 @@ def build_method_folder_name(method: str, basis: str, dispersion: str, solvent: 
     return "_".join(folder_parts)
 
 
-def create_file_metadata(method: dict, bs: dict, file_mode: str, category: str, 
-                        branch: str, species: str, calc_type: str, catalyst_name: str,
+def create_file_metadata(method: dict, basis_set: dict, mode: str, category: str, 
+                        branch: str, species: str, calc_type: str, catalyst: str,
                         file_path: Path, config_manager=None) -> dict:
     """
-    Create standardized metadata for a file.
-    Centralized function to ensure consistency.
+    Create comprehensive, standardized metadata for calculation files.
+    
+    Args:
+        method: Method configuration dict
+        basis_set: Basis set configuration dict  
+        mode: Calculation mode ("opt" or "sp")
+        category: Calculation category ("no_cat" or "cat")
+        branch: Calculation branch ("reactants", "products", "ts", etc.)
+        species: Species name for this calculation
+        calc_type: Calculation type ("full_cat", "pol_cat", "frz_cat", etc.)
+        catalyst: Catalyst name (empty string if none)
+        file_path: Path to the calculation file
+        config_manager: Optional config manager for component lists
+        
+    Returns:
+        Comprehensive metadata dictionary with all available information
     """
-    if file_mode == "opt":
+    # Core identification metadata
+    core_metadata = {
+        "Species": species,
+        "Category": category, 
+        "Branch": branch,
+        "Calc_Type": calc_type,
+        "Catalyst": catalyst,
+        "Mode": mode,
+        "Path": str(file_path)
+    }
+    
+    # Method and computational parameters
+    computational_metadata = _get_computational_metadata(method, basis_set, mode)
+    
+    # Additional method parameters
+    additional_metadata = {
+        "eda2": method.get("eda2", "0")  # EDA2 parameter for analysis
+    }
+    
+    # Component information from config manager
+    component_metadata = {}
+    if config_manager:
+        component_metadata = _get_reaction_components(config_manager, species, catalyst)
+    
+    # Combine all metadata
+    return {
+        **core_metadata,
+        **computational_metadata,
+        **additional_metadata,
+        **component_metadata
+    }
+
+
+def _get_computational_metadata(method: dict, basis_set: dict, mode: str) -> dict:
+    """Extract computational method metadata with method combos."""
+    if mode == "opt":
         method_combo = build_method_folder_name(
             method["name"]["opt"],
-            bs["opt"],
+            basis_set["opt"],
             method["dispersion"]["opt"],
             method["solvent"]["opt"]
         )
-        
-        # Get component lists from config manager if available
-        component_lists = {}
-        if config_manager:
-            config = config_manager.get_builder_config()
-            component_lists = {
-                "reactants": [r["name"]["opt"] for r in config.get("reactants", [])],
-                "products": [p["name"]["opt"] for p in config.get("products", [])], 
-                "catalysts": [c["name"]["opt"] for c in config.get("catalysts", [])]
-            }
         
         return {
             "Method": method["name"]["opt"],
             "Method_Combo": method_combo,
-            "Basis": bs["opt"],
+            "Basis": basis_set["opt"],
             "Dispersion": method["dispersion"]["opt"],
-            "Solvent": method["solvent"]["opt"],
-            "Category": category,
-            "Branch": branch,
-            "Species": species,
-            "Calc_Type": calc_type,
-            "Catalyst": catalyst_name,
-            "Mode": file_mode,
-            "eda2": method.get("eda2", "0"),  # Add EDA2 parameter for consistency
-            "Path": str(file_path),
-            **component_lists  # Add component lists to metadata
+            "Solvent": method["solvent"]["opt"]
         }
-    else:  # sp
+    
+    else:  # sp mode
+        # Base method combo for folder structure
         base_method_combo = build_method_folder_name(
             method["name"]["opt"],
-            bs["opt"],
+            basis_set["opt"],
             method["dispersion"]["opt"],
             method["solvent"]["opt"]
         )
         
+        # SP method combo for SP calculations
         sp_method_combo = build_method_folder_name(
             method["name"]["sp"],
-            bs["sp"],
+            basis_set["sp"],
             method["dispersion"]["sp"],
             method["solvent"]["sp"]
         )
         
-        # Get component lists from config manager if available
-        component_lists = {}
-        if config_manager:
-            config = config_manager.get_builder_config()
-            component_lists = {
-                "reactants": [r["name"]["opt"] for r in config.get("reactants", [])],
-                "products": [p["name"]["opt"] for p in config.get("products", [])], 
-                "catalysts": [c["name"]["opt"] for c in config.get("catalysts", [])]
-            }
-        
         return {
-            "Method": method["name"]["opt"],
-            "Method_Combo": base_method_combo,
-            "SP_Method": method["name"]["sp"],
-            "SP_Method_Combo": sp_method_combo,
-            "Basis": bs["opt"],
-            "SP_Basis": bs["sp"],
-            "Dispersion": method["dispersion"]["opt"],
-            "SP_Dispersion": method["dispersion"]["sp"],
-            "Solvent": method["solvent"]["opt"],
-            "SP_Solvent": method["solvent"]["sp"],
-            "Category": category,
-            "Branch": branch,
-            "Species": species,
-            "Calc_Type": calc_type,
-            "Catalyst": catalyst_name,
-            "Mode": file_mode,
-            "eda2": method.get("eda2", "0"),  # Add EDA2 parameter for automatic detection
-            "Path": str(file_path),
-            **component_lists  # Add component lists to metadata
+            "Method": method["name"]["opt"],           # Base method for folder structure
+            "Method_Combo": base_method_combo,         # Base method combo
+            "SP_Method": method["name"]["sp"],          # SP-specific method
+            "SP_Method_Combo": sp_method_combo,        # SP-specific method combo
+            "Basis": basis_set["opt"],                 # Base basis for folder structure
+            "SP_Basis": basis_set["sp"],               # SP-specific basis
+            "Dispersion": method["dispersion"]["opt"], # Base dispersion
+            "SP_Dispersion": method["dispersion"]["sp"], # SP-specific dispersion
+            "Solvent": method["solvent"]["opt"],       # Base solvent
+            "SP_Solvent": method["solvent"]["sp"]      # SP-specific solvent
         }
+
+
+def _get_reaction_components(config_manager, species: str, catalyst: str) -> dict:
+    """Extract comprehensive reaction component metadata from config manager."""
+    config = config_manager.get_builder_config()
+    
+    # Get complete reaction components
+    all_reactants = [r["name"]["opt"] for r in config.get("reactants", [])]
+    all_products = [p["name"]["opt"] for p in config.get("products", [])]
+    all_catalysts = [c["name"]["opt"] for c in config.get("catalysts", [])]
+    
+    # Filter to components present in this specific calculation
+    present_reactants = [r for r in all_reactants if r in species]
+    present_products = [p for p in all_products if p in species]
+    present_catalysts = [c for c in all_catalysts if c in species or c == catalyst]
+    
+    return {
+        # Components present in this specific calculation
+        "reactants": present_reactants,     
+        "products": present_products,       
+        "catalysts": present_catalysts,     
+        
+        # Complete reaction information (for profile extraction)
+        "all_reactants": all_reactants,     
+        "all_products": all_products,       
+        "all_catalysts": all_catalysts      
+    }
 
 
 def process_input_files(config_manager, system_dir: Path, mode: str = "generate",
