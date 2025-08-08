@@ -30,6 +30,56 @@ from PyA3EDA.core.builders.builder import iter_input_paths
 
 
 # CORE EXTRACTION FUNCTIONS (pure)
+
+def _extract_base_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract base metadata fields common to all extraction types."""
+    return {
+        "Species": metadata.get("Species", "unknown"),
+        "Category": metadata.get("Category", "unknown"),
+        "Branch": metadata.get("Branch", "unknown"),
+        "Calc_Type": metadata.get("Calc_Type", "unknown"),
+        "Catalyst": metadata.get("Catalyst", ""),
+        "Mode": metadata.get("Mode", "unknown"),
+        "eda2": metadata.get("eda2", "unknown"),
+        # Component information for profile extraction
+        "reactants": metadata.get("reactants", []),
+        "products": metadata.get("products", []),
+        "catalysts": metadata.get("catalysts", []),
+        "all_reactants": metadata.get("all_reactants", []),
+        "all_products": metadata.get("all_products", []),
+        "all_catalysts": metadata.get("all_catalysts", [])
+    }
+
+
+def _extract_opt_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract OPT-specific metadata fields."""
+    base_metadata = _extract_base_metadata(metadata)
+    base_metadata.update({
+        "Method": metadata.get("Method", "unknown"),
+        "Method_Combo": metadata.get("Method_Combo", "unknown"),
+        "Basis": metadata.get("Basis", "unknown"),
+        "Dispersion": metadata.get("Dispersion", "unknown"),
+        "Solvent": metadata.get("Solvent", "unknown")
+    })
+    return base_metadata
+
+
+def _extract_sp_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract SP-specific metadata fields."""
+    base_metadata = _extract_base_metadata(metadata)
+    base_metadata.update({
+        # Base method info for folder structure
+        "Method_Combo": metadata.get("Method_Combo", "unknown"),
+        # SP-specific method info
+        "SP_Method": metadata.get("SP_Method", "unknown"),
+        "SP_Method_Combo": metadata.get("SP_Method_Combo", "unknown"),
+        "SP_Basis": metadata.get("SP_Basis", "unknown"),
+        "SP_Dispersion": metadata.get("SP_Dispersion", "unknown"),
+        "SP_Solvent": metadata.get("SP_Solvent", "unknown")
+    })
+    return base_metadata
+
+
 def extract_opt_data(file_path: Path, metadata: Dict[str, Any], criteria: str = "SUCCESSFUL") -> Optional[Dict[str, Any]]:
     """
     Extract all data from OPT output file.
@@ -63,19 +113,8 @@ def extract_opt_data(file_path: Path, metadata: Dict[str, Any], criteria: str = 
         logging.warning(f"Failed to extract thermodynamic data from: {file_path}")
         return None
     
-    # Start with metadata first, then add extracted data
-    data = {
-        "Method_Combo": metadata.get("Method_Combo", "unknown"),
-        "Method": metadata.get("Method", "unknown"),
-        "Basis": metadata.get("Basis", "unknown"),
-        "Solvent": metadata.get("Solvent", "unknown"),
-        "Category": metadata.get("Category", "unknown"),
-        "Branch": metadata.get("Branch", "unknown"),
-        "Species": metadata.get("Species", "unknown"),
-        "Calc_Type": metadata.get("Calc_Type", "unknown"),
-        "Mode": metadata.get("Mode", "unknown"),
-        "eda2": metadata.get("eda2", "unknown")
-    }
+    # Start with clean metadata extraction
+    data = _extract_opt_metadata(metadata)
     
     # Add extracted thermodynamic data
     data.update(thermo_data)
@@ -117,20 +156,8 @@ def extract_sp_data(file_path: Path, metadata: Dict[str, Any], criteria: str = "
         logging.warning(f"Failed to extract SP data from: {file_path}")
         return None
     
-    # Start with metadata first, then add extracted data
-    data = {
-        "Method_Combo": metadata.get("Method_Combo", "unknown"),
-        "SP_Method_Combo": metadata.get("SP_Method_Combo", "unknown"),
-        "SP_Method": metadata.get("SP_Method", "unknown"),
-        "SP_Basis": metadata.get("SP_Basis", "unknown"),
-        "SP_Solvent": metadata.get("SP_Solvent", "unknown"),
-        "Category": metadata.get("Category", "unknown"),
-        "Branch": metadata.get("Branch", "unknown"),
-        "Species": metadata.get("Species", "unknown"),
-        "Calc_Type": metadata.get("Calc_Type", "unknown"),
-        "Mode": metadata.get("Mode", "unknown"),
-        "eda2": metadata.get("eda2", "unknown")
-    }
+    # Start with clean metadata extraction
+    data = _extract_sp_metadata(metadata)
     
     # Add extracted SP thermodynamic data
     data.update(thermo_data)
@@ -165,19 +192,17 @@ def extract_xyz_data(file_path: Path, metadata: Dict[str, Any], criteria: str = 
         logging.warning(f"Could not read content from: {file_path}")
         return None
         
-    # Use the molecule identifier from metadata for XYZ parsing
-    identifier = metadata.get("Molecule", file_path.stem)
+    # Use the species identifier from metadata for XYZ parsing
+    identifier = metadata.get("Species", file_path.stem)
     xyz_data = parse_qchem_output_xyz(content, identifier)
     
     if xyz_data:
-        # Add metadata for file organization
-        result = {
+        return {
             "coordinates": xyz_data,
             "Species": metadata.get("Species", "unknown"),
             "output_file_stem": file_path.stem,
             "data_type": metadata.get("Mode", "unknown")
         }
-        return result
     else:
         logging.warning(f"Failed to parse XYZ coordinates from: {file_path}")
         return None
@@ -591,8 +616,7 @@ def extract_all_data(config_manager, system_dir: Path, criteria: str = "SUCCESSF
     # Export all data
     if all_extracted_data:
         from PyA3EDA.core.exporters.data_exporter import export_all_combos
-        output_dir = system_dir / "results"
-        export_all_combos(all_extracted_data, output_dir)
+        export_all_combos(all_extracted_data, system_dir, enable_profiles=True)
         
         total_combos = len(all_extracted_data)
         total_files = sum(
