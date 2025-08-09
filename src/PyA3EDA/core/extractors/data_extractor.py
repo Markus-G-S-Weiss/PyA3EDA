@@ -1,13 +1,13 @@
 """
-Data extraction module with ultra-simple architecture.
+Data extraction module with clean separation of concerns.
 
-This module provides ONE function that does everything:
-- extract_all_combos: Discovers, extracts, and exports all data
+This module provides pure extraction functions:
+- extract_all_data: Discovers and extracts all data, returns structured results
 
-Ultra-simple separation of concerns:
-- Workflow: Calls ONE function (extract_all_combos)
-- Extractor: Handles discovery, extraction, output directory, and calls exporter
-- Exporter: Only creates folders and writes files
+Clean separation of concerns:
+- Extractor: Handles discovery and extraction only
+- Exporter: Handles file writing and directory organization  
+- Workflow: Orchestrates extraction and export
 
 Single source of truth via iter_input_paths()
 """
@@ -507,10 +507,13 @@ def calculate_enthalpy_and_gibbs(data: Dict[str, Any], mode: str) -> None:
 
 # MAIN EXTRACTION FUNCTION
 
-def extract_all_data(config_manager, system_dir: Path, criteria: str = "SUCCESSFUL") -> None:
+def extract_all_data(config_manager, system_dir: Path, criteria: str = "SUCCESSFUL") -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
     """
-    Extract data for all method combos and export to files.
-    Single function that handles everything - discovery, extraction, and export.
+    Extract data for all method combos and return extracted data.
+    Pure extraction function - does not handle export.
+    
+    Returns:
+        Dictionary mapping method combo names to their extracted data
     """
     all_extracted_data = {}
     
@@ -613,16 +616,15 @@ def extract_all_data(config_manager, system_dir: Path, criteria: str = "SUCCESSF
             all_extracted_data[combo_name] = combo_data
             logging.info(f"Extracted from {combo_name}: {len(opt_data)} OPT, {len(sp_data)} SP, {len(xyz_data)} XYZ")
     
-    # Export all data
+    # Return extracted data for external export handling
     if all_extracted_data:
-        from PyA3EDA.core.exporters.data_exporter import export_all_combos
-        export_all_combos(all_extracted_data, system_dir, enable_profiles=True)
-        
         total_combos = len(all_extracted_data)
         total_files = sum(
             len(combo_data["opt_data"]) + len(combo_data["sp_data"]) + len(combo_data["xyz_data"])
             for combo_data in all_extracted_data.values()
         )
-        logging.info(f"Completed: {total_combos} method combos, {total_files} total files")
+        logging.info(f"Extraction completed: {total_combos} method combos, {total_files} total files")
+        return all_extracted_data
     else:
-        logging.warning("No data extracted - nothing to export")
+        logging.warning("No data extracted")
+        return {}
