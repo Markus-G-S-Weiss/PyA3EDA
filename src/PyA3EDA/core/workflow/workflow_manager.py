@@ -11,7 +11,7 @@ from PyA3EDA.core.config.config_manager import ConfigManager
 class WorkflowManager:
     def __init__(self, config_manager: ConfigManager, args=None) -> None:
         self.config_manager = config_manager
-        self.system_dir = Path.cwd()
+        self.system_dir = config_manager.config_dir
         self.args = args
 
     def generate_inputs(self) -> None:
@@ -36,7 +36,7 @@ class WorkflowManager:
         run_criteria = getattr(self.args, 'run', None) if self.args else None
         
         run_all_calculations(
-            self.config_manager.processed_config,
+            self.config_manager,
             self.system_dir,
             run_criteria
         )
@@ -47,27 +47,23 @@ class WorkflowManager:
         prints a formatted status report and summary.
         """
         from PyA3EDA.core.status.status_checker import check_all_statuses
-        check_all_statuses(self.config_manager.processed_config, self.system_dir)
+        check_all_statuses(self.config_manager, self.system_dir)
 
     def extract_data(self) -> None:
         """
-        Extract data from output files and save to CSV.
+        Extract and export data with proper separation of concerns.
         """
-        from PyA3EDA.core.exporters.data_exporter import extract_and_save
+        from PyA3EDA.core.extractors.data_extractor import extract_all_data
+        from PyA3EDA.core.exporters.data_exporter import export_all_combos
         
-        # Get extraction criteria
-        # If extract is a boolean flag, convert to string criteria
-        if hasattr(self.args, 'extract'):
-            if self.args.extract is True:
-                criteria = "SUCCESSFUL"  # Default when -e flag is used
-            else:
-                criteria = self.args.extract  # If it's a string value
+        criteria = getattr(self.args, 'extract', None) if self.args else "SUCCESSFUL"
+        
+        # Step 1: Extract data (pure extraction, no export)
+        extracted_data = extract_all_data(self.config_manager, self.system_dir, criteria)
+        
+        # Step 2: Export data (if any was extracted)
+        if extracted_data:
+            export_all_combos(extracted_data, self.system_dir, enable_profiles=True)
+            logging.info("Data extraction and export completed successfully")
         else:
-            criteria = "SUCCESSFUL"  # Default if not specified
-        
-        # Let data_exporter handle the results directory creation
-        extract_and_save(
-            self.config_manager.processed_config,
-            self.system_dir,
-            criteria=criteria
-        )
+            logging.warning("No data extracted - nothing to export")

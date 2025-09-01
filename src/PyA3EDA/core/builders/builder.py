@@ -216,44 +216,15 @@ def build_file_path(system_dir: Path, method: str, basis: str, dispersion: str, 
         top_solvent = opt_params.get("solvent")
         suffix = "_sp.in"
 
-        # Create sp_folder name without "false" values
-        sp_folder_parts = [method]
-        
-        # Only include dispersion if not false
-        if dispersion and dispersion.lower() != "false":
-            sp_folder_parts.append(dispersion)
-            
-        # Always include basis set
-        sp_folder_parts.append(basis)
-        
-        # Only include solvent if not false
-        if solvent and solvent.lower() != "false":
-            sp_folder_parts.append(solvent)
-        
-        # Add sp suffix
-        sp_folder_parts.append("sp")
-        
-        # Join parts with underscores
-        sp_folder = "_".join(sp_folder_parts)
+        # Create sp_folder name using the centralized function
+        sp_folder_base = build_method_folder_name(method, basis, dispersion, solvent)
+        sp_folder = f"{sp_folder_base}_sp"
     else:
         raise ValueError(f"Unknown mode: {mode}")
   
-    # Create folder name without "false" values
-    folder_parts = [top_method]
-    
-    # Only include dispersion if not false
-    if top_disp and top_disp.lower() != "false":
-        folder_parts.append(top_disp)
-        
-    # Always include basis set
-    folder_parts.append(top_basis)
-    
-    # Only include solvent if not false
-    if top_solvent and top_solvent.lower() != "false":
-        folder_parts.append(top_solvent)
-    
-    # Join parts with underscores
-    base_folder = system_dir / "_".join(folder_parts)
+    # Create base folder name using the centralized function
+    base_folder_name = build_method_folder_name(top_method, top_basis, top_disp, top_solvent)
+    base_folder = system_dir / base_folder_name
   
     if category == "no_cat":
         if branch in ("reactants", "products"):
@@ -271,6 +242,7 @@ def build_file_path(system_dir: Path, method: str, basis: str, dispersion: str, 
     elif category == "cat":
         if not catalyst_name:
             raise ValueError("For catalyst cases, catalyst_name must be provided.")
+        
         if branch == "preTS":
             if mode == "opt":
                 relative = Path(catalyst_name) / "preTS" / species / calc_type / f"preTS_{species}_{calc_type}{suffix}"
@@ -356,16 +328,6 @@ def build_and_write_input_file(system_dir: Path,
             category, branch, species, calc_type, catalyst_name, mode="opt"
         )
         
-        if sp_strategy == "smart":
-            # Check if optimization was successful
-            from PyA3EDA.core.status.status_checker import get_status_for_file
-            
-            status, details = get_status_for_file(opt_input_path)
-            
-            if status != "SUCCESSFUL":
-                logging.info(f"Skipping SP file generation for {species} - OPT status is {status}: {details}")
-                return
-                
         opt_output_path = opt_input_path.with_suffix(".out")
     else:
         opt_params = None
@@ -380,9 +342,22 @@ def build_and_write_input_file(system_dir: Path,
         category, branch, species, calc_type, catalyst_name, mode, opt_params
     )
     
+    from PyA3EDA.core.status.status_checker import should_process_file
+
+    # Check SP strategy after building SP file path so we can log the correct file
+    if mode == "sp" and sp_strategy == "smart":
+        # Create minimal metadata for validation (only need Branch for TS validation)
+        opt_metadata = {"Mode": "opt", "Branch": branch}
+        # Check if OPT file should be processed as "SUCCESSFUL" (includes validation)        
+        should_generate, reason = should_process_file(opt_input_path, "SUCCESSFUL", opt_metadata)
+        
+        if not should_generate:
+            logging.info(f"Skipping SP file ({reason}): {file_path.relative_to(system_dir)}")
+            return
+
     # Check if file exists and determine if we should overwrite
     if file_path.exists():
-        from PyA3EDA.core.status.status_checker import should_process_file
+        # Check if we should overwrite based on the provided criteria
         should_write, reason = should_process_file(file_path, overwrite)
         if not should_write:
             logging.info(f"Skipping file ({reason}): {file_path.relative_to(system_dir)}")
@@ -490,6 +465,158 @@ def get_combinations(species_list, min_length=2):
             yield "-".join(spec["name"]["opt"] for spec in combo)
 
 
+def build_method_folder_name(method: str, basis: str, dispersion: str, solvent: str) -> str:
+    """
+    Build a method folder name by filtering out 'false' values.
+    Used consistently for both OPT and SP folder naming.
+    """
+    folder_parts = [method]
+    
+    # Only include dispersion if not false
+    if dispersion and dispersion.lower() != "false":
+        folder_parts.append(dispersion)
+        
+    # Always include basis set
+    folder_parts.append(basis)
+    
+    # Only include solvent if not false
+    if solvent and solvent.lower() != "false":
+        folder_parts.append(solvent)
+    
+    # Join parts with underscores
+    return "_".join(folder_parts)
+
+
+def create_file_metadata(method: dict, basis_set: dict, mode: str, category: str, 
+                        branch: str, species: str, calc_type: str, catalyst: str,
+                        file_path: Path, config_manager=None) -> dict:
+    """
+    Create comprehensive, standardized metadata for calculation files.
+    
+    Args:
+        method: Method configuration dict
+        basis_set: Basis set configuration dict  
+        mode: Calculation mode ("opt" or "sp")
+        category: Calculation category ("no_cat" or "cat")
+        branch: Calculation branch ("reactants", "products", "ts", etc.)
+        species: Species name for this calculation
+        calc_type: Calculation type ("full_cat", "pol_cat", "frz_cat", etc.)
+        catalyst: Catalyst name (empty string if none)
+        file_path: Path to the calculation file
+        config_manager: Optional config manager for component lists
+        
+    Returns:
+        Comprehensive metadata dictionary with all available information
+    """
+    # Core identification metadata
+    core_metadata = {
+        "Species": species,
+        "Category": category, 
+        "Branch": branch,
+        "Calc_Type": calc_type,
+        "Catalyst": catalyst,
+        "Mode": mode,
+        "Path": str(file_path)
+    }
+    
+    # Method and computational parameters
+    computational_metadata = _get_computational_metadata(method, basis_set, mode)
+    
+    # Additional method parameters
+    additional_metadata = {
+        "eda2": method.get("eda2", "0")  # EDA2 parameter for analysis
+    }
+    
+    # Component information from config manager
+    component_metadata = {}
+    if config_manager:
+        component_metadata = _get_reaction_components(config_manager, species, catalyst)
+    
+    # Combine all metadata
+    return {
+        **core_metadata,
+        **computational_metadata,
+        **additional_metadata,
+        **component_metadata
+    }
+
+
+def _get_computational_metadata(method: dict, basis_set: dict, mode: str) -> dict:
+    """Extract computational method metadata with method combos."""
+    if mode == "opt":
+        method_combo = build_method_folder_name(
+            method["name"]["opt"],
+            basis_set["opt"],
+            method["dispersion"]["opt"],
+            method["solvent"]["opt"]
+        )
+        
+        return {
+            "Method": method["name"]["opt"],
+            "Method_Combo": method_combo,
+            "Basis": basis_set["opt"],
+            "Dispersion": method["dispersion"]["opt"],
+            "Solvent": method["solvent"]["opt"]
+        }
+    
+    else:  # sp mode
+        # Base method combo for folder structure
+        base_method_combo = build_method_folder_name(
+            method["name"]["opt"],
+            basis_set["opt"],
+            method["dispersion"]["opt"],
+            method["solvent"]["opt"]
+        )
+        
+        # SP method combo for SP calculations
+        sp_method_combo = build_method_folder_name(
+            method["name"]["sp"],
+            basis_set["sp"],
+            method["dispersion"]["sp"],
+            method["solvent"]["sp"]
+        )
+        
+        return {
+            "Method": method["name"]["opt"],           # Base method for folder structure
+            "Method_Combo": base_method_combo,         # Base method combo
+            "SP_Method": method["name"]["sp"],          # SP-specific method
+            "SP_Method_Combo": sp_method_combo,        # SP-specific method combo
+            "Basis": basis_set["opt"],                 # Base basis for folder structure
+            "SP_Basis": basis_set["sp"],               # SP-specific basis
+            "Dispersion": method["dispersion"]["opt"], # Base dispersion
+            "SP_Dispersion": method["dispersion"]["sp"], # SP-specific dispersion
+            "Solvent": method["solvent"]["opt"],       # Base solvent
+            "SP_Solvent": method["solvent"]["sp"]      # SP-specific solvent
+        }
+
+
+def _get_reaction_components(config_manager, species: str, catalyst: str) -> dict:
+    """Extract comprehensive reaction component metadata from config manager."""
+    config = config_manager.get_builder_config()
+    
+    # Get complete reaction components
+    all_reactants = [r["name"]["opt"] for r in config.get("reactants", [])]
+    all_products = [p["name"]["opt"] for p in config.get("products", [])]
+    all_catalysts = [c["name"]["opt"] for c in config.get("catalysts", [])]
+    
+    # Filter to components present in this specific calculation
+    present_reactants = [r for r in all_reactants if r in species]
+    present_products = [p for p in all_products if p in species]
+    present_catalysts = [c for c in all_catalysts if c in species or c == catalyst]
+    
+    return {
+        # Components present in this specific calculation
+        "reactants": present_reactants,     
+        "products": present_products,       
+        "catalysts": present_catalysts,     
+        
+        # Complete reaction information (for profile extraction)
+        "all_reactants": all_reactants,     
+        "all_products": all_products,       
+        "all_catalysts": all_catalysts      
+    }
+
+
 def process_input_files(config_manager, system_dir: Path, mode: str = "generate",
                        overwrite: str = None, sp_strategy: str = "smart"):
     """
@@ -515,59 +642,49 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
     # Helper function to handle both path generation and file writing
     def process_file(method, bs, file_mode, category, branch, species, calc_type="", 
                     catalyst_name="", template_prefix="", molecule_fn=None):
-        """
-        Process a single input file - either yield its path or build and write it.
-        """
+        """Process a single input file - either yield its path or build and write it."""
+        nonlocal processed_opt_files
+        
         if file_mode == "sp" and not (method["name"].get("sp_enabled", False) and bs.get("sp_enabled", False)):
             return
 
-        # Always build the file path
+        # Build file path
         if file_mode == "opt":
             file_path = build_file_path(
-                system_dir,
-                method["name"]["opt"],
-                bs["opt"], 
-                method["dispersion"]["opt"],
-                method["solvent"]["opt"],
-                category, branch, species, calc_type, catalyst_name,
-                mode=file_mode
+                system_dir, method["name"]["opt"], bs["opt"], 
+                method["dispersion"]["opt"], method["solvent"]["opt"],
+                category, branch, species, calc_type, catalyst_name, mode=file_mode
             )
             
-            # Create a unique key for this OPT file
+            # Check for duplicates
             opt_key = (
                 method["name"]["opt"], bs["opt"], 
                 method["dispersion"]["opt"], method["solvent"]["opt"],
                 category, branch, species, calc_type, catalyst_name
             )
             
-            # If we've already processed this exact OPT file, skip it
             if opt_key in processed_opt_files:
-                if mode == "yield":
-                    return None
-            else:
-                # Otherwise mark it as processed
-                processed_opt_files.add(opt_key)
-                
+                return None
+            processed_opt_files.add(opt_key)
         else:  # sp
             file_path = build_file_path(
-                system_dir,
-                method["name"]["sp"],
-                bs["sp"],
-                method["dispersion"]["sp"],
-                method["solvent"]["sp"],
-                category, branch, species, calc_type, catalyst_name,
-                mode=file_mode,
+                system_dir, method["name"]["sp"], bs["sp"],
+                method["dispersion"]["sp"], method["solvent"]["sp"],
+                category, branch, species, calc_type, catalyst_name, mode=file_mode,
                 opt_params={
-                    "method": method["name"]["opt"],
-                    "basis": bs["opt"],
-                    "dispersion": method["dispersion"]["opt"],
-                    "solvent": method["solvent"]["opt"]
+                    "method": method["name"]["opt"], "basis": bs["opt"],
+                    "dispersion": method["dispersion"]["opt"], "solvent": method["solvent"]["opt"]
                 }
             )
         
-        # For yield mode, just yield the path
+        # Create metadata
+        metadata = create_file_metadata(method, bs, file_mode, category, branch, 
+                                    species, calc_type, catalyst_name, file_path, config_manager)
+        
+        # For yield mode, return path with metadata
         if mode == "yield":
-            return file_path
+            from types import SimpleNamespace
+            return SimpleNamespace(path=file_path, metadata=metadata)
         
         # For generate mode, build and write the file
         sanitized, original = config_manager.get_common_values(method, bs, file_mode)
@@ -577,129 +694,118 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
         molecule_template_path = templates_dir / "molecule" / f"{template_name}.xyz"
         
         build_and_write_input_file(
-            system_dir=system_dir,
-            sanitized=sanitized,
-            original=original,
-            category=category,
-            branch=branch,
-            species=species,
-            calc_type=calc_type,
-            template_base_path=base_template_path,
-            molecule_template_path=molecule_template_path,
-            molecule_proc_fn=molecule_fn,
-            catalyst_name=catalyst_name,
-            mode=file_mode,
-            overwrite=overwrite,
-            sp_strategy=sp_strategy
+            system_dir=system_dir, sanitized=sanitized, original=original,
+            category=category, branch=branch, species=species, calc_type=calc_type,
+            template_base_path=base_template_path, molecule_template_path=molecule_template_path,
+            molecule_proc_fn=molecule_fn, catalyst_name=catalyst_name, mode=file_mode,
+            overwrite=overwrite, sp_strategy=sp_strategy
         )
         
         # Return None for consistency (calling code will filter these)
         return None
 
-    # --- no_cat (non-catalyst) branch ---
+    # Group methods by OPT configuration
+    opt_groups = {}
     for method in processed_config.get("methods", []):
         for bs in method.get("basis_sets", []):
-            # --- Process reactants ---
-            for reactant in processed_config.get("reactants", []):
-                species = reactant["name"]["opt"]
-                
-                for file_mode in ("opt", "sp"):
-                    result = process_file(
-                        method, bs, file_mode, "no_cat", "reactants", species,
-                        molecule_fn=build_standard_molecule_section
-                    )
-                    if mode == "yield" and result:
-                        yield result
+            opt_key = (
+                method["name"]["opt"], method["dispersion"]["opt"],
+                bs["opt"], method["solvent"]["opt"]
+            )
             
-            # --- Process reactant combinations ---
-            reactants_incl = [r for r in processed_config.get("reactants", []) if r.get("include", True)]
-            if len(reactants_incl) > 1:
-                for combo in get_combinations(reactants_incl, min_length=2):
-                    for file_mode in ("opt", "sp"):
-                        result = process_file(
-                            method, bs, file_mode, "no_cat", "reactants", combo,
-                            molecule_fn=build_standard_molecule_section
-                        )
-                        if mode == "yield" and result:
-                            yield result
+            if opt_key not in opt_groups:
+                opt_groups[opt_key] = {"opt_method": method, "opt_bs": bs, "sp_configs": []}
             
-            # --- Process products ---
-            for product in processed_config.get("products", []):
-                species = product["name"]["opt"]
-                
-                for file_mode in ("opt", "sp"):
-                    result = process_file(
-                        method, bs, file_mode, "no_cat", "products", species,
-                        molecule_fn=build_standard_molecule_section
-                    )
-                    if mode == "yield" and result:
-                        yield result
+            if method["name"].get("sp_enabled", False) and bs.get("sp_enabled", False):
+                opt_groups[opt_key]["sp_configs"].append({"method": method, "bs": bs})
+
+    # Helper to process OPT file followed by all corresponding SP files for a species
+    def process_opt_and_sp_for_species(category, branch, species, calc_type="", 
+                                     catalyst_name="", template_prefix="", molecule_fn=None):
+        """Helper to process OPT file followed by all corresponding SP files for a species."""
+        for opt_key, group in opt_groups.items():
+            # Process OPT first
+            result = process_file(
+                group["opt_method"], group["opt_bs"], "opt", category, branch, species,
+                calc_type, catalyst_name, template_prefix, molecule_fn
+            )
+            if mode == "yield" and result:
+                yield result
             
-            # --- Process transition state (TS) ---
-            for file_mode in ("opt", "sp"):
+            # Then process all SP files for this OPT
+            for sp_config in group["sp_configs"]:
                 result = process_file(
-                    method, bs, file_mode, "no_cat", "ts", "tscomplex",
-                    molecule_fn=build_standard_molecule_section
+                    sp_config["method"], sp_config["bs"], "sp", category, branch, species,
+                    calc_type, catalyst_name, template_prefix, molecule_fn
                 )
                 if mode == "yield" and result:
                     yield result
-            
-            # --- Process catalysts ---
-            for catalyst in processed_config.get("catalysts", []):
-                cat_name = catalyst["name"]["opt"]
-                
-                # --- Catalyst itself ---
-                for file_mode in ("opt", "sp"):
-                    result = process_file(
-                        method, bs, file_mode, "cat", "cat", cat_name,
-                        catalyst_name=cat_name,
-                        molecule_fn=build_standard_molecule_section
-                    )
-                    if mode == "yield" and result:
-                        yield result
-                
-                # --- preTS: catalyst with reactants ---
-                reactants_incl = [r for r in processed_config.get("reactants", []) if r.get("include", True)]
-                for combo in get_combinations(reactants_incl, min_length=1):
-                    species_combo = f"{cat_name}-{combo}"
-                    
-                    for calc_type in ("full_cat", "pol_cat", "frz_cat"):
-                        for file_mode in ("opt", "sp"):
-                            result = process_file(
-                                method, bs, file_mode, "cat", "preTS", species_combo,
-                                calc_type=calc_type, catalyst_name=cat_name,
-                                template_prefix="preTS_",
-                                molecule_fn=build_fragmented_molecule_section
-                            )
-                            if mode == "yield" and result:
-                                yield result
-                
-                # --- postTS: catalyst with products ---
-                products_incl = [p for p in processed_config.get("products", []) if p.get("include", True)]
-                for combo in get_combinations(products_incl, min_length=1):
-                    species_combo = f"{cat_name}-{combo}"
-                    
-                    for calc_type in ("full_cat", "pol_cat", "frz_cat"):
-                        for file_mode in ("opt", "sp"):
-                            result = process_file(
-                                method, bs, file_mode, "cat", "postTS", species_combo,
-                                calc_type=calc_type, catalyst_name=cat_name,
-                                template_prefix="postTS_",
-                                molecule_fn=build_fragmented_molecule_section
-                            )
-                            if mode == "yield" and result:
-                                yield result
-                
-                # --- TS: Catalyst TS ---
-                for calc_type in ("full_cat", "pol_cat", "frz_cat"):
-                    for file_mode in ("opt", "sp"):
-                        result = process_file(
-                            method, bs, file_mode, "cat", "ts", f"ts_{cat_name}-tscomplex",
-                            calc_type=calc_type, catalyst_name=cat_name,
-                            molecule_fn=build_fragmented_molecule_section
-                        )
-                        if mode == "yield" and result:
-                            yield result
+
+    # Process each species type with OPT-first-then-SP order
+    for category, branch, species_list, species_fn in [
+        ("no_cat", "reactants", processed_config.get("reactants", []), lambda r: r["name"]["opt"]),
+        ("no_cat", "products", processed_config.get("products", []), lambda p: p["name"]["opt"]),
+        ("no_cat", "ts", [{"name": {"opt": "tscomplex"}}], lambda t: t["name"]["opt"])
+    ]:
+        for species_data in species_list:
+            species = species_fn(species_data)
+            yield from process_opt_and_sp_for_species(
+                category, branch, species, molecule_fn=build_standard_molecule_section
+            )
+
+    # Process reactant combinations
+    reactants_incl = [r for r in processed_config.get("reactants", []) if r.get("include", True)]
+    if len(reactants_incl) > 1:
+        for combo in get_combinations(reactants_incl, min_length=2):
+            yield from process_opt_and_sp_for_species(
+                "no_cat", "reactants", combo, molecule_fn=build_standard_molecule_section
+            )
+
+    # # Process product combinations (commented out - uncomment if needed for completeness)
+    # products_incl = [p for p in processed_config.get("products", []) if p.get("include", True)]
+    # if len(products_incl) > 1:
+    #     for combo in get_combinations(products_incl, min_length=2):
+    #         yield from process_opt_and_sp_for_species(
+    #             "no_cat", "products", combo, molecule_fn=build_standard_molecule_section
+    #         )
+
+    # Process catalysts
+    for catalyst in processed_config.get("catalysts", []):
+        cat_name = catalyst["name"]["opt"]
+        
+        # Catalyst itself
+        yield from process_opt_and_sp_for_species(
+            "cat", "cat", cat_name, catalyst_name=cat_name, 
+            molecule_fn=build_standard_molecule_section
+        )
+        
+        # preTS: catalyst with reactants
+        for combo in get_combinations(reactants_incl, min_length=1):
+            species_combo = f"{cat_name}-{combo}"
+            for calc_type in ("full_cat", "pol_cat", "frz_cat"):
+                yield from process_opt_and_sp_for_species(
+                    "cat", "preTS", species_combo, calc_type=calc_type, 
+                    catalyst_name=cat_name, template_prefix="preTS_",
+                    molecule_fn=build_fragmented_molecule_section
+                )
+        
+        # postTS: catalyst with products  
+        products_incl = [p for p in processed_config.get("products", []) if p.get("include", True)]
+        for combo in get_combinations(products_incl, min_length=1):
+            species_combo = f"{cat_name}-{combo}"
+            for calc_type in ("full_cat", "pol_cat", "frz_cat"):
+                yield from process_opt_and_sp_for_species(
+                    "cat", "postTS", species_combo, calc_type=calc_type,
+                    catalyst_name=cat_name, template_prefix="postTS_",
+                    molecule_fn=build_fragmented_molecule_section
+                )
+        
+        # TS: Catalyst TS
+        for calc_type in ("full_cat", "pol_cat", "frz_cat"):
+            yield from process_opt_and_sp_for_species(
+                "cat", "ts", f"ts_{cat_name}-tscomplex", calc_type=calc_type,
+                catalyst_name=cat_name, molecule_fn=build_fragmented_molecule_section
+            )
 
     if mode == "generate":
         logging.info("Input file generation completed.")
@@ -710,6 +816,26 @@ def generate_all_inputs(config_manager, system_dir: Path, overwrite: str = None,
     list(process_input_files(config_manager, system_dir, "generate", overwrite, sp_strategy))
 
 
-def iter_input_paths(config_manager, system_dir: Path):
-    """Iterates through the unified config from config_manager and yields input file paths."""
-    yield from process_input_files(config_manager, system_dir, "yield")
+def iter_input_paths(config, system_dir: Path, include_metadata: bool = False):
+    """
+    Iterate through all input file paths, optionally with metadata.
+    
+    This function serves as the single source of truth for file discovery across
+    the PyA3EDA system, used by status checker, data extractor, and executor.
+    
+    Args:
+        config: ConfigManager instance with processed configuration
+        system_dir: Base system directory
+        include_metadata: Whether to include metadata with paths
+        
+    Yields:
+        Path objects (if include_metadata=False) or SimpleNamespace objects 
+        with 'path' and 'metadata' attributes (if include_metadata=True)
+    """
+    # Use the existing process_input_files function in yield mode
+    for result in process_input_files(config, system_dir, mode="yield"):
+        if result:
+            if include_metadata:
+                yield result  # Return the full object with path and metadata
+            else:
+                yield result.path  # Extract just the path
