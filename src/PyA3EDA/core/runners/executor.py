@@ -14,7 +14,7 @@ def execute_qchem(input_file: Path, cores: int = 32, time_limit: str = "30-00:00
     logging.info(f'Executing qqchem for {input_file}')
     try:
         subprocess.run(
-            ['qqchem', '-c', str(cores), '-t', time_limit, "--dryrun", input_file.name],
+            ['qqchem', '-c', str(cores), '-t', time_limit, input_file.name],
             # ['qqchem', '-c', str(cores), '-t', time_limit, '-v', 'modqchem', '--qcsetup', '/groups/sterling/software-tools/qchem/qcsetup6211', input_file.name],
             # '-x', node,
             check=True,
