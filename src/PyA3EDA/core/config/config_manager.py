@@ -69,12 +69,12 @@ class ConfigManager:
         opt_sanitized = sanitize_filename(str(raw_opt))
         sp_sanitized = ""
         sp_enabled = False
-        if raw_sp not in [None, False, "false", ""]:
+        if raw_sp is not None:
             sp_sanitized = sanitize_filename(str(raw_sp))
             sp_enabled = True
         return {
             "original_opt": str(raw_opt),
-            "original_sp": str(raw_sp) if raw_sp not in [None, False, "false", ""] else None,
+            "original_sp": str(raw_sp) if raw_sp is not None else None,
             "opt": opt_sanitized,
             "sp": sp_sanitized,
             "sp_enabled": sp_enabled
@@ -131,7 +131,7 @@ class ConfigManager:
         """
         Returns two dictionaries (sanitized, original) that hold the naming values.
         For mode "opt", use the "opt" values.
-        For mode "sp", also include the opt values (prefixed as "opt_*") for file naming.
+        For mode "sp", use the "sp" values where available, falling back to "opt" values.
         
         Args:
             method: A processed method dictionary
@@ -157,14 +157,20 @@ class ConfigManager:
         
         # Process fields based on mode
         for field_name, field_dict in fields:
-            # Add the main fields (either opt or sp)
-            field_mode = mode
-            sanitized[field_name] = field_dict[field_mode]
-            original_key = f"original_{field_mode}"
-            original[field_name] = field_dict.get(original_key) or field_dict[f"original_opt"]
-            
-            # For sp mode, also add the opt values with opt_ prefix
-            if mode == "sp":
+            if mode == "opt":
+                # For OPT mode, always use opt values
+                sanitized[field_name] = field_dict["opt"]
+                original[field_name] = field_dict["original_opt"]
+            else:  # mode == "sp"
+                # For SP mode, use sp values if sp_enabled, otherwise use opt values
+                if field_dict.get("sp_enabled", False):
+                    sanitized[field_name] = field_dict["sp"]
+                    original[field_name] = field_dict["original_sp"]
+                else:
+                    sanitized[field_name] = field_dict["opt"]
+                    original[field_name] = field_dict["original_opt"]
+                
+                # Always add opt values with opt_ prefix for SP mode (for file naming)
                 sanitized[f"opt_{field_name}"] = field_dict["opt"]
         
         # Add eda2 to original dict for sp mode
