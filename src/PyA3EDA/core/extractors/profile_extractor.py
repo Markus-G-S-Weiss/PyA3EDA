@@ -25,10 +25,11 @@ class ProfileExtractor:
         if not self.raw_data:
             return {"all_reactants": [], "all_products": [], "all_catalysts": []}
         
+        # Get first entry's component data (all entries should have same reaction setup)
         first_entry = self.raw_data[0]
         return {
             "all_reactants": first_entry.get("all_reactants", []),
-            "all_products": first_entry.get("all_products", []),
+            "all_products": first_entry.get("all_products", []),  
             "all_catalysts": first_entry.get("all_catalysts", [])
         }
     
@@ -79,155 +80,163 @@ class ProfileExtractor:
             matches.append(entry)
         return matches
     
-    def _create_additive_stage(self, stage_name: str, species_list: List[str], calc_type: str = None) -> Optional[Dict[str, Any]]:
-        """Create stage by adding energies of multiple species."""
-        total_e = total_g = 0.0
+    def _create_stage(self, stage_name: str, species_list: List[str], calc_types: List[str] = None) -> Optional[Dict[str, Any]]:
+        """Create stage by summing energies of species list."""
+        if not species_list:
+            return None
         
-        for species in species_list:
+        total_e = total_g = 0.0
+        calc_types = calc_types or [None] * len(species_list)
+        
+        # Sum energies for all species
+        for species, calc_type in zip(species_list, calc_types):
             energy = self._get_energy(species, calc_type)
             if not energy:
                 return None
             total_e += energy["E"]
             total_g += energy["G"]
         
+        # Simple source description
+        if len(species_list) == 1 and calc_types[0]:
+            source = f"Direct ({calc_types[0]})"
+        elif len(species_list) == 1:
+            source = "Direct"
+        else:
+            source = "Addition"
+        
         return {
             "Stage": stage_name,
             "Species": " + ".join(species_list),
             "E (kcal/mol)": total_e,
             "G (kcal/mol)": total_g,
-            "Source": f"Energy addition: {' + '.join(species_list)}"
+            "Source": source
         }
     
-    def _create_direct_stage(self, stage_name: str, species: str, calc_type: str = None) -> Optional[Dict[str, Any]]:
-        """Create stage from direct calculation."""
-        energy = self._get_energy(species, calc_type)
-        if not energy:
-            return None
+    def _process_entries(self, entries: List[Dict[str, Any]], stage_prefix: str, 
+                        missing_logic: callable = None, category: str = "no_cat") -> List[Dict[str, Any]]:
+        """Generic entry processor for stage generation."""
+        stages = []
+        seen_combinations = set() if category == "no_cat" else None
         
-        calc_type_str = f" ({calc_type})" if calc_type else ""
-        return {
-            "Stage": stage_name,
-            "Species": species,
-            "E (kcal/mol)": energy["E"],
-            "G (kcal/mol)": energy["G"],
-            "Source": f"Direct calculation: {species}{calc_type_str}"
-        }
+        for entry in entries:
+            # Get basic entry info
+            species = entry["Species"]
+            calc_type = entry.get("Calc_Type") if entry.get("Category") == "cat" else None
+            stage_name = f"{stage_prefix}_{calc_type}" if calc_type else stage_prefix
+            
+            # Determine species list and calc_types
+            if missing_logic:
+                species_list, calc_types = missing_logic(entry)
+            else:
+                species_list, calc_types = [species], [calc_type] if calc_type else None
+            
+            # Create stage
+            stage = self._create_stage(stage_name, species_list, calc_types)
+            if not stage:
+                continue
+                
+            # Handle duplicates for no_cat
+            if seen_combinations is not None:
+                species_set = frozenset(stage["Species"].split(" + "))
+                if species_set in seen_combinations:
+                    continue
+                seen_combinations.add(species_set)
+            
+            stages.append(stage)
+        
+        return stages
     
-    def _create_combined_stage(self, stage_name: str, base_entry: Dict[str, Any], missing_components: List[str]) -> Optional[Dict[str, Any]]:
-        """Create stage by combining base calculation with missing components."""
-        calc_type = base_entry.get("Calc_Type", "")
-        base_species = base_entry["Species"]
+    def _generate_component_stages(self, stage_name: str, branch: str, components: List[str], catalyst: str = None, category: str = "no_cat") -> List[Dict[str, Any]]:
+        """Generate stages for reactants or products using entries from raw data."""
+        entries = self._find_entries(branch=branch, category=category, catalyst=catalyst if category == "cat" else None)
         
-        # Get base energy with calc_type
-        base_energy = self._get_energy(base_species, calc_type)
-        if not base_energy:
-            return None
+        def missing_logic(entry):
+            present_components = entry.get(branch, [])
+            missing_components = [c for c in components if c not in present_components]
+            return self._get_component_species_list(entry, missing_components, catalyst, category)
         
-        total_e = base_energy["E"]
-        total_g = base_energy["G"]
-        
-        # Add missing components
-        for component in missing_components:
-            component_energy = self._get_energy(component)
-            if not component_energy:
-                return None
-            total_e += component_energy["E"]
-            total_g += component_energy["G"]
-        
-        species_list = [base_species] + missing_components
-        return {
-            "Stage": stage_name,
-            "Species": " + ".join(species_list),
-            "E (kcal/mol)": total_e,
-            "G (kcal/mol)": total_g,
-            "Source": f"Energy addition: {' + '.join(species_list)}"
-        }
+        return self._process_entries(entries, stage_name, missing_logic, category)
     
+    def _get_component_species_list(self, entry: Dict[str, Any], missing_components: List[str], 
+                                   catalyst: str, category: str) -> tuple:
+        """Get species list and calc_types for component-based stages."""
+        species = entry["Species"]
+        calc_type = entry.get("Calc_Type", "")
+        
+        if category == "no_cat" and catalyst:
+            if missing_components:
+                # Add missing components + catalyst
+                species_list = [species] + [catalyst] + missing_components
+                calc_types = [calc_type] + [None] * (len(missing_components) + 1)
+            else:
+                # Just add catalyst
+                species_list = [catalyst, species]
+                calc_types = [None, calc_type] if calc_type else None
+        else:
+            # For "no_cat" without catalyst, or "cat" entries
+            if missing_components:
+                # Add missing components
+                species_list = [species] + missing_components
+                calc_types = [calc_type] + [None] * len(missing_components)
+            else:
+                # Use directly
+                species_list = [species]
+                calc_types = [calc_type] if calc_type else None
+        
+        return species_list, calc_types
+
     def _generate_basic_stages(self, catalyst: str = None) -> List[Dict[str, Any]]:
         """Generate reactants and products stages."""
         stages = []
         
-        # Reactants stage
-        if catalyst:
-            reactants_species = [catalyst] + self.components["all_reactants"]
-        else:
-            reactants_species = self.components["all_reactants"]
+        # Generate reactants stages
+        reactants_stages = self._generate_component_stages(
+            "Reactants", "reactants", self.components["all_reactants"], catalyst
+        )
+        stages.extend(reactants_stages)
         
-        reactants_stage = self._create_additive_stage("Reactants", reactants_species)
-        if reactants_stage:
-            stages.append(reactants_stage)
-        
-        # Products stage
+        # Generate products stage (simple addition)
         if catalyst:
             products_species = [catalyst] + self.components["all_products"]
         else:
             products_species = self.components["all_products"]
         
-        products_stage = self._create_additive_stage("Products", products_species)
+        products_stage = self._create_stage("Products", products_species)
         if products_stage:
             stages.append(products_stage)
         
         return stages
     
+    def _generate_catalyst_stages(self, branch: str, stage_prefix: str, catalyst: str, component_type: str) -> List[Dict[str, Any]]:
+        """Generate catalyst-specific stages (preTS/postTS) with missing component logic."""
+        entries = self._find_entries(branch=branch, category="cat", catalyst=catalyst)
+        
+        def missing_logic(entry):
+            present_components = entry.get(component_type.replace("all_", ""), [])
+            missing_components = [c for c in self.components[component_type] if c not in present_components]
+            calc_type = entry.get("Calc_Type", "")
+            
+            if missing_components:
+                # Combined: base species + missing components
+                species_list = [entry["Species"]] + missing_components
+                calc_types = [calc_type] + [None] * len(missing_components)
+            else:
+                # Direct: just the base species
+                species_list = [entry["Species"]]
+                calc_types = [calc_type]
+            
+            return species_list, calc_types
+        
+        return self._process_entries(entries, stage_prefix, missing_logic, "cat")
+    
     def _generate_ts_stages(self, catalyst: str = None) -> List[Dict[str, Any]]:
         """Generate TS stages for catalyst or no_cat."""
-        stages = []
-        
         if catalyst:
-            ts_entries = self._find_entries(branch="ts", category="cat", catalyst=catalyst)
-            for entry in ts_entries:
-                calc_type = entry.get("Calc_Type", "unknown")
-                stage = self._create_direct_stage(f"TS_{calc_type}", entry["Species"], calc_type)
-                if stage:
-                    stages.append(stage)
+            entries = self._find_entries(branch="ts", category="cat", catalyst=catalyst)
+            return self._process_entries(entries, "TS", category="cat")
         else:
-            ts_entries = self._find_entries(branch="ts", category="no_cat")
-            for entry in ts_entries:
-                stage = self._create_direct_stage("TS_no_cat", entry["Species"])
-                if stage:
-                    stages.append(stage)
-        
-        return stages
-    
-    def _generate_pretsm_stages(self, catalyst: str) -> List[Dict[str, Any]]:
-        """Generate preTS stages for catalyst."""
-        stages = []
-        pretsm_entries = self._find_entries(branch="preTS", category="cat", catalyst=catalyst)
-        
-        for entry in pretsm_entries:
-            calc_type = entry.get("Calc_Type", "unknown")
-            present_reactants = entry.get("reactants", [])
-            missing_reactants = [r for r in self.components["all_reactants"] if r not in present_reactants]
-            
-            if missing_reactants:
-                stage = self._create_combined_stage(f"preTS_{calc_type}", entry, missing_reactants)
-            else:
-                stage = self._create_direct_stage(f"preTS_{calc_type}", entry["Species"], calc_type)
-            
-            if stage:
-                stages.append(stage)
-        
-        return stages
-    
-    def _generate_postsm_stages(self, catalyst: str) -> List[Dict[str, Any]]:
-        """Generate postTS stages for catalyst."""
-        stages = []
-        postsm_entries = self._find_entries(branch="postTS", category="cat", catalyst=catalyst)
-        
-        for entry in postsm_entries:
-            calc_type = entry.get("Calc_Type", "unknown")
-            present_products = entry.get("products", [])
-            missing_products = [p for p in self.components["all_products"] if p not in present_products]
-            
-            if missing_products:
-                stage = self._create_combined_stage(f"postTS_{calc_type}", entry, missing_products)
-            else:
-                stage = self._create_direct_stage(f"postTS_{calc_type}", entry["Species"], calc_type)
-            
-            if stage:
-                stages.append(stage)
-        
-        return stages
+            entries = self._find_entries(branch="ts", category="no_cat")
+            return self._process_entries(entries, "TS_no_cat", category="no_cat")
     
     def extract_profiles(self) -> Dict[str, List[Dict[str, Any]]]:
         """Extract all energy profiles."""
@@ -249,8 +258,8 @@ class ProfileExtractor:
             catalyst_profile = []
             catalyst_profile.extend(self._generate_basic_stages(catalyst))
             catalyst_profile.extend(self._generate_ts_stages(catalyst))
-            catalyst_profile.extend(self._generate_pretsm_stages(catalyst))
-            catalyst_profile.extend(self._generate_postsm_stages(catalyst))
+            catalyst_profile.extend(self._generate_catalyst_stages("preTS", "preTS", catalyst, "all_reactants"))
+            catalyst_profile.extend(self._generate_catalyst_stages("postTS", "postTS", catalyst, "all_products"))
             
             if catalyst_profile:
                 profiles[catalyst] = catalyst_profile
