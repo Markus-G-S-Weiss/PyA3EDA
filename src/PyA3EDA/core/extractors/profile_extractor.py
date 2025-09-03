@@ -1,27 +1,59 @@
 """
-Clean Profile Extractor - DRY Metadata-Driven Approach
+Energy Profile Extractor for Quantum Chemistry Calculations.
 
-Extract energy profiles using calculation-specific components from metadata.
-No name parsing - metadata is the single source of truth.
+Processes quantum chemistry calculation data to construct reaction energy profiles
+for both catalyzed and uncatalyzed pathways. Uses metadata-driven approach to 
+identify reaction components and build comprehensive energy profiles.
 
-Usage:
-    extractor = ProfileExtractor(raw_data_list)
-    profiles = extractor.extract_profiles()
+Example:
+     extractor = ProfileExtractor(calculation_data)
+     profiles = extractor.extract_profiles()
+     print(profiles['no_cat'])  # Uncatalyzed pathway
 """
 from typing import Dict, List, Any, Optional
 
 
 class ProfileExtractor:
-    """Clean, DRY profile extraction using metadata-driven approach."""
+    """
+    Extracts energy profiles from quantum chemistry calculation data.
+    
+    This class processes raw quantum chemistry calculation results to generate
+    comprehensive energy profiles for chemical reactions. It handles both 
+    catalyzed and uncatalyzed reaction pathways, supporting various calculation
+    types including EDA (Energy Decomposition Analysis) methods.
+    
+    Attributes:
+        raw_data (List[Dict[str, Any]]): Raw calculation data containing energies and metadata.
+        components (Dict[str, List[str]]): Identified reaction components (reactants, products, catalysts).
+        energy_lookup (Dict[str, Dict[str, float]]): Optimized lookup table for species energies.
+    """
     
     def __init__(self, raw_data_list: List[Dict[str, Any]]):
-        """Initialize with raw calculation data."""
+        """
+        Initialize the ProfileExtractor with calculation data.
+        
+        Args:
+            raw_data_list (List[Dict[str, Any]]): List of calculation data dictionaries.
+                Each dictionary must contain:
+                - 'Species': Species identifier string
+                - 'Branch': Calculation branch ('reactants', 'products', 'ts', 'preTS', 'postTS', 'cat')
+                - 'Category': Calculation category ('no_cat', 'cat')
+                - 'E (kcal/mol)' or 'SP_E (kcal/mol)': Electronic energy in kcal/mol
+                - 'G (kcal/mol)': Gibbs free energy in kcal/mol
+                - 'all_reactants': List of reactant species names
+                - 'all_products': List of product species names
+                - 'all_catalysts': List of catalyst species names
+                - 'Calc_Type' (optional): EDA calculation type ('frz_cat', 'pol_cat', 'full_cat')
+        
+        Raises:
+            ValueError: If raw_data_list is empty or contains invalid data.
+        """
         self.raw_data = raw_data_list
         self.components = self._get_components()
         self.energy_lookup = self._build_energy_lookup()
     
     def _get_components(self) -> Dict[str, List[str]]:
-        """Extract complete reaction components from metadata."""
+        """Extract reaction components from calculation metadata."""
         if not self.raw_data:
             return {"all_reactants": [], "all_products": [], "all_catalysts": []}
         
@@ -34,7 +66,7 @@ class ProfileExtractor:
         }
     
     def _build_energy_lookup(self) -> Dict[str, Dict[str, float]]:
-        """Build energy lookup table with calc_type-specific keys."""
+        """Build energy lookup table with support for calculation-specific keys."""
         energy_lookup = {}
         
         for data in self.raw_data:
@@ -59,7 +91,7 @@ class ProfileExtractor:
         return energy_lookup
     
     def _get_energy(self, species: str, calc_type: str = None) -> Optional[Dict[str, float]]:
-        """Get energy for species, trying calc_type-specific key first."""
+        """Get energy for species, trying calc_type-specific key first if provided."""
         if calc_type:
             calc_type_key = f"{species}_{calc_type}"
             if calc_type_key in self.energy_lookup:
@@ -68,7 +100,7 @@ class ProfileExtractor:
         return self.energy_lookup.get(species)
     
     def _find_entries(self, branch: str = None, category: str = None, catalyst: str = None) -> List[Dict[str, Any]]:
-        """Find entries matching metadata criteria."""
+        """Find calculation entries matching specified metadata criteria."""
         matches = []
         for entry in self.raw_data:
             if branch and entry.get("Branch") != branch:
@@ -81,6 +113,27 @@ class ProfileExtractor:
         return matches
     
     def _create_stage(self, stage_name: str, species_list: List[str], calc_types: List[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Create an energy profile stage by combining species energies.
+        
+        Constructs a single stage in the energy profile by summing the energies
+        of the specified species list.
+        
+        Args:
+            stage_name (str): Name identifier for the profile stage.
+            species_list (List[str]): List of species identifiers to combine.
+            calc_types (List[str], optional): List of calculation types corresponding
+                to each species. Must match length of species_list if provided.
+                
+        Returns:
+            Optional[Dict[str, Any]]: Dictionary containing stage data with keys:
+                - 'Stage': Stage name identifier
+                - 'Species': Combined species string (space + separated)
+                - 'E (kcal/mol)': Total electronic energy
+                - 'G (kcal/mol)': Total Gibbs free energy
+                - 'Source': Energy source description
+                Returns None if any required energies are unavailable.
+        """
         """Create stage by summing energies of species list."""
         if not species_list:
             return None
@@ -114,7 +167,7 @@ class ProfileExtractor:
     
     def _process_entries(self, entries: List[Dict[str, Any]], stage_prefix: str, 
                         missing_logic: callable = None, category: str = "no_cat") -> List[Dict[str, Any]]:
-        """Generic entry processor for stage generation."""
+        """Process calculation entries to generate energy profile stages with customizable logic."""
         stages = []
         seen_combinations = set() if category == "no_cat" else None
         
@@ -166,7 +219,7 @@ class ProfileExtractor:
         if category == "no_cat" and catalyst:
             if missing_components:
                 # Add missing components + catalyst
-                species_list = [species] + [catalyst] + missing_components
+                species_list = [catalyst] + [species] + missing_components
                 calc_types = [calc_type] + [None] * (len(missing_components) + 1)
             else:
                 # Just add catalyst
@@ -185,29 +238,23 @@ class ProfileExtractor:
         
         return species_list, calc_types
 
-    def _generate_basic_stages(self, catalyst: str = None) -> List[Dict[str, Any]]:
-        """Generate reactants and products stages."""
-        stages = []
+    def _generate_basic_component_stages(self, component_type: str, catalyst: str = None) -> List[Dict[str, Any]]:
+        """Generate energy profile stages for reactants or products."""
+        # Map component types to their data
+        component_mapping = {
+            "reactants": ("Reactants", "reactants", "all_reactants"),
+            "products": ("Products", "products", "all_products")
+        }
         
-        # Generate reactants stages
-        reactants_stages = self._generate_component_stages(
-            "Reactants", "reactants", self.components["all_reactants"], catalyst
-        )
-        stages.extend(reactants_stages)
+        if component_type not in component_mapping:
+            raise ValueError(f"Unknown component_type: {component_type}. Must be 'reactants' or 'products'")
         
-        # Generate products stage (simple addition)
-        if catalyst:
-            products_species = [catalyst] + self.components["all_products"]
-        else:
-            products_species = self.components["all_products"]
+        stage_name, branch, components_key = component_mapping[component_type]
+        components = self.components[components_key]
         
-        products_stage = self._create_stage("Products", products_species)
-        if products_stage:
-            stages.append(products_stage)
-        
-        return stages
+        return self._generate_component_stages(stage_name, branch, components, catalyst)
     
-    def _generate_catalyst_stages(self, branch: str, stage_prefix: str, catalyst: str, component_type: str) -> List[Dict[str, Any]]:
+    def _generate_prepost_stages(self, branch: str, stage_prefix: str, catalyst: str, component_type: str) -> List[Dict[str, Any]]:
         """Generate catalyst-specific stages (preTS/postTS) with missing component logic."""
         entries = self._find_entries(branch=branch, category="cat", catalyst=catalyst)
         
@@ -239,7 +286,34 @@ class ProfileExtractor:
             return self._process_entries(entries, "TS_no_cat", category="no_cat")
     
     def extract_profiles(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Extract all energy profiles."""
+        """
+        Extract energy profiles for all reaction pathways.
+        
+        Generates comprehensive energy profiles for both uncatalyzed and catalyzed
+        reaction pathways from the provided calculation data.
+        
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: Dictionary mapping pathway names to their
+                energy profiles. Keys include:
+                - 'no_cat': Uncatalyzed reaction pathway
+                - '{catalyst_name}': Catalyzed pathways for each catalyst
+                
+                Each profile is a list of stage dictionaries containing:
+                - 'Stage': Stage identifier
+                - 'Species': Species combination string
+                - 'E (kcal/mol)': Electronic energy
+                - 'G (kcal/mol)': Gibbs free energy
+                - 'Source': Energy source description
+                
+        Note:
+            Returns empty dictionary if no calculation data is available.
+            
+        Example:
+            >>> profiles = extractor.extract_profiles()
+            >>> print(profiles['no_cat'][0])
+            {'Stage': 'Reactants', 'Species': 'A + B', 'E (kcal/mol)': -100.5, 
+             'G (kcal/mol)': -98.2, 'Source': 'Addition'}
+        """
         if not self.raw_data:
             return {}
         
@@ -247,8 +321,9 @@ class ProfileExtractor:
         
         # Generate no_cat profile
         no_cat_profile = []
-        no_cat_profile.extend(self._generate_basic_stages())
+        no_cat_profile.extend(self._generate_basic_component_stages("reactants"))
         no_cat_profile.extend(self._generate_ts_stages())
+        no_cat_profile.extend(self._generate_basic_component_stages("products"))
         
         if no_cat_profile:
             profiles["no_cat"] = no_cat_profile
@@ -256,11 +331,13 @@ class ProfileExtractor:
         # Generate catalyst profiles
         for catalyst in self.components["all_catalysts"]:
             catalyst_profile = []
-            catalyst_profile.extend(self._generate_basic_stages(catalyst))
+            catalyst_profile.extend(self._generate_basic_component_stages("reactants", catalyst))
+            catalyst_profile.extend(self._generate_prepost_stages("preTS", "preTS", catalyst, "all_reactants"))
             catalyst_profile.extend(self._generate_ts_stages(catalyst))
-            catalyst_profile.extend(self._generate_catalyst_stages("preTS", "preTS", catalyst, "all_reactants"))
-            catalyst_profile.extend(self._generate_catalyst_stages("postTS", "postTS", catalyst, "all_products"))
-            
+            catalyst_profile.extend(self._generate_prepost_stages("postTS", "postTS", catalyst, "all_products"))
+            catalyst_profile.extend(self._generate_basic_component_stages("products", catalyst))
+
+
             if catalyst_profile:
                 profiles[catalyst] = catalyst_profile
         
