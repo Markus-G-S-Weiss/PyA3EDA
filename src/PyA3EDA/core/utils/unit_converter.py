@@ -34,7 +34,7 @@ def convert_energy_unit(value: float, unit: str, target_unit: str = "kcal/mol") 
     if ((unit_lower in hartree_units and target_lower in hartree_units) or
         (unit_lower in kcalmol_units and target_lower in kcalmol_units) or
         (unit_lower in kjmol_units and target_lower in kjmol_units) or
-        (unit_lower in calmolkelvin_units and target_lower in kcalmolkelvin_units) or
+        (unit_lower in calmolkelvin_units and target_lower in calmolkelvin_units) or
         (unit_lower in kcalmolkelvin_units and target_lower in kcalmolkelvin_units)):
         return value
     
