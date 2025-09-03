@@ -93,7 +93,7 @@ def write_xyz_files(data_list: List[Dict[str, Any]], output_dir: Path) -> Dict[s
             
             # Write file
             if write_text(file_path, xyz_content):
-                results[f"{species}"] = file_path
+                results[file_stem] = file_path
                 logging.debug(f"Written XYZ file: {file_path}")
                 
         except Exception as e:
