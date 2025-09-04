@@ -309,8 +309,8 @@ class ProfileExtractor:
             Returns empty dictionary if no calculation data is available.
             
         Example:
-            >>> profiles = extractor.extract_profiles()
-            >>> print(profiles['no_cat'][0])
+            profiles = extractor.extract_profiles()
+            print(profiles['no_cat'][0])
             {'Stage': 'Reactants', 'Species': 'A + B', 'E (kcal/mol)': -100.5, 
              'G (kcal/mol)': -98.2, 'Source': 'Addition'}
         """
