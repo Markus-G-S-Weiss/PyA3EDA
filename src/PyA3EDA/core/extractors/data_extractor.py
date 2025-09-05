@@ -92,11 +92,8 @@ def extract_opt_data(file_path: Path, metadata: Dict[str, Any], criteria: str = 
     Returns:
         Dictionary with extracted OPT data or None if extraction fails
     """
-    # Get corresponding input file for status checking
-    input_path = file_path.with_suffix(".in")
-    
     # Check if file should be processed with enhanced OPT validation
-    should_process, reason = should_process_file(input_path, criteria, metadata)
+    should_process, reason = should_process_file(file_path, criteria, metadata)
     if not should_process:
         logging.debug(f"Skipping file {reason}: {file_path}")
         return None
@@ -135,11 +132,8 @@ def extract_sp_data(file_path: Path, metadata: Dict[str, Any], criteria: str = "
     Returns:
         Dictionary with extracted SP data or None if extraction fails
     """
-    # Get corresponding input file for status checking
-    input_path = file_path.with_suffix(".in")
-    
     # Check if file should be processed
-    should_process, reason = should_process_file(input_path, criteria, metadata)
+    should_process, reason = should_process_file(file_path, criteria, metadata)
     if not should_process:
         logging.debug(f"Skipping file {reason}: {file_path}")
         return None
@@ -177,11 +171,8 @@ def extract_xyz_data(file_path: Path, metadata: Dict[str, Any], criteria: str = 
     Returns:
         Dictionary with coordinate data or None if extraction fails
     """
-    # Get corresponding input file for status checking
-    input_path = file_path.with_suffix(".in")
-    
     # Check if file should be processed
-    should_process, reason = should_process_file(input_path, criteria, metadata)
+    should_process, reason = should_process_file(file_path, criteria, metadata)
     if not should_process:
         logging.debug(f"Skipping XYZ extraction for {file_path.name}: {reason}")
         return None
