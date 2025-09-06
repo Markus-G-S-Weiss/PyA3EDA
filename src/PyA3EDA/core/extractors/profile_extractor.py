@@ -376,3 +376,32 @@ class ProfileExtractor:
                 profiles[catalyst] = catalyst_profiles
         
         return profiles
+
+    @classmethod
+    def process_all_profiles(cls, raw_data: Dict[str, Dict[str, List[Dict[str, Any]]]]) -> Dict[str, Dict[str, Any]]:
+        """
+        Process all raw extracted data into profiles for all method combos.
+        
+        Args:
+            raw_data: Dictionary mapping method combo names to their extracted data
+            
+        Returns:
+            Dictionary with raw data + processed profiles for each combo
+        """
+        if not raw_data:
+            return {}
+        
+        processed_data = {}
+        for combo_name, combo_data in raw_data.items():
+            processed_data[combo_name] = {
+                **combo_data,  # Keep all original data
+                "profiles": {}  # Add profiles
+            }
+            
+            # Process profiles for each data type (opt/sp)
+            for data_key in ["opt_data", "sp_data"]:
+                if combo_data.get(data_key):
+                    extractor = cls(combo_data[data_key])
+                    processed_data[combo_name]["profiles"][data_key] = extractor.extract_profiles(filter_duplicates=True)
+        
+        return processed_data
