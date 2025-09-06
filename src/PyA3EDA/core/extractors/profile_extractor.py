@@ -9,6 +9,7 @@ Example:
      extractor = ProfileExtractor(calculation_data)
      profiles = extractor.extract_profiles()
 """
+import logging
 from typing import Dict, List, Any, Optional
 
 
@@ -148,6 +149,12 @@ class ProfileExtractor:
             total_e += energy["E"]
             total_g += energy["G"]
         
+        # Get primary calc_type with sanity check
+        non_empty_calc_types = [ct for ct in calc_types if ct]
+        if len(set(non_empty_calc_types)) > 1:
+            logging.warning(f"Mixed calc_types in '{stage_name}': {set(non_empty_calc_types)}")
+        primary_calc_type = non_empty_calc_types[0] if non_empty_calc_types else None
+        
         # Simple source description
         if len(species_list) == 1 and calc_types[0]:
             source = f"Direct ({calc_types[0]})"
@@ -158,6 +165,7 @@ class ProfileExtractor:
         
         return {
             "Stage": stage_name,
+            "Calc_Type": primary_calc_type,
             "Species": " + ".join(species_list),
             "E (kcal/mol)": total_e,
             "G (kcal/mol)": total_g,
@@ -249,13 +257,8 @@ class ProfileExtractor:
         for entry in entries:
             calc_type = entry.get("Calc_Type", "")
             
-            # Build stage name
-            if stage_config.get("needs_calc_type") and calc_type:
-                stage_name = f"{stage_config['stage_name']}_{calc_type}"
-            else:
-                stage_name = stage_config["stage_name"]
-                # if stage_config.get("needs_catalyst"):
-                #     stage_name = f"{stage_name}_{catalyst}"
+            # Build stage name - keep stage separate from calc_type
+            stage_name = stage_config["stage_name"]  # Just use base stage name
             
             # Build species list based on configuration
             species_list = [entry["Species"]]
@@ -304,15 +307,72 @@ class ProfileExtractor:
         
         return profile
 
-    def extract_profiles(self) -> Dict[str, List[Dict[str, Any]]]:
+    def _filter_profile(self, profile: List[Dict[str, Any]], energy_type: str) -> List[Dict[str, Any]]:
+        """Smart filtering: Group by stage, find min full_cat, keep same species for pol/frz_cat."""
+        energy_key = f"{energy_type} (kcal/mol)"
+        stage_groups = {}
+        
+        # Group by stage name (e.g., "Reactants", "preTS", "TS", etc.)
+        for stage in profile:
+            stage_name = stage.get("Stage", "")
+            if stage_name not in stage_groups:
+                stage_groups[stage_name] = []
+            stage_groups[stage_name].append(stage)
+        
+        filtered = []
+        for stage_name, stages in stage_groups.items():
+            # Subgroup stages: those with calc_types vs those without
+            calc_type_stages = [s for s in stages if s.get("Calc_Type") and s.get("Calc_Type") not in [None, "", "unknown"]]
+            no_calc_type_stages = [s for s in stages if not s.get("Calc_Type") or s.get("Calc_Type") in [None, "", "unknown"]]
+            
+            # Handle calc_type subgroup: smart filtering via full_cat
+            if calc_type_stages:
+                full_cat_stages = [s for s in calc_type_stages if s.get("Calc_Type") == "full_cat"]
+                if full_cat_stages:
+                    # Find min full_cat, keep same species for pol/frz_cat  
+                    min_full_cat = min(full_cat_stages, key=lambda x: x.get(energy_key, float('inf')))
+                    min_species = min_full_cat.get("Species", "")
+                    
+                    filtered.append(min_full_cat)
+                    for calc_type in ["pol_cat", "frz_cat"]:
+                        matching_stages = [
+                            s for s in calc_type_stages 
+                            if s.get("Calc_Type") == calc_type and s.get("Species") == min_species
+                        ]
+                        if matching_stages:
+                            filtered.append(matching_stages[0])
+                else:
+                    # Has calc_types but no full_cat: find lowest energy stage, then keep all calc_types for that species
+                    min_stage = min(calc_type_stages, key=lambda x: x.get(energy_key, float('inf')))
+                    min_species = min_stage.get("Species", "")
+                    
+                    # Keep all calc_types that match the minimum species
+                    for stage in calc_type_stages:
+                        if stage.get("Species") == min_species:
+                            filtered.append(stage)
+            
+            # Handle no-calc_type subgroup: simple minimum energy
+            if no_calc_type_stages:
+                min_no_calc = min(no_calc_type_stages, key=lambda x: x.get(energy_key, float('inf')))
+                filtered.append(min_no_calc)
+        
+        return sorted(filtered, key=lambda s: profile.index(s))  # Keep original order
+
+    def extract_profiles(self, filter_duplicates: bool = False) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
         """Extract energy profiles for all catalyst pathways."""
         if not self.raw_data:
             return {}
         
         profiles = {}
         for catalyst in self.components["all_catalysts"]:
-            profile = self._generate_catalyst_profile(catalyst)
-            if profile:  # Only include non-empty profiles
-                profiles[catalyst] = profile
+            raw_profile = self._generate_catalyst_profile(catalyst)
+            if raw_profile:  # Only include non-empty profiles
+                catalyst_profiles = {"raw": raw_profile}
+                
+                if filter_duplicates:
+                    catalyst_profiles["E"] = self._filter_profile(raw_profile, "E")
+                    catalyst_profiles["G"] = self._filter_profile(raw_profile, "G")
+                
+                profiles[catalyst] = catalyst_profiles
         
         return profiles

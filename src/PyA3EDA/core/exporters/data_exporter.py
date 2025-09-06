@@ -115,12 +115,16 @@ def export_all_combos(extracted_data: Dict[str, Dict[str, List[Dict[str, Any]]]]
         
     Creates directory structure:
         base_dir/results/{method_combo}/
-        ├── raw_data/           # Raw extracted data CSV files
+        ├── raw_data/           # Raw extracted data + raw profiles (all entries)
         │   ├── opt_{opt_method_combo}.csv
-        │   └── sp_{sp_method_combo}.csv
-        ├── profiles/           # Energy profile CSV files per catalyst
-        │   ├── opt_profile_{catalyst}.csv
-        │   └── {sp_method_combo}_profile_{catalyst}.csv
+        │   ├── sp_{sp_method_combo}.csv
+        │   ├── raw_opt_profile_{method_combo}_{catalyst}.csv
+        │   └── raw_sp_profile_{method_combo}_{catalyst}.csv
+        ├── profiles/           # Filtered profiles (lowest energy per stage) 
+        │   ├── opt_profile_E_{method_combo}_{catalyst}.csv     # OPT filtered by E
+        │   ├── opt_profile_G_{method_combo}_{catalyst}.csv     # OPT filtered by G
+        │   ├── sp_profile_E_{method_combo}_{catalyst}.csv      # SP filtered by E
+        │   └── sp_profile_G_{method_combo}_{catalyst}.csv      # SP filtered by G
         └── xyz_files/          # XYZ coordinate files
     """
     if not extracted_data:
@@ -166,11 +170,18 @@ def export_all_combos(extracted_data: Dict[str, Dict[str, List[Dict[str, Any]]]]
                 if enable_profiles:
                     from PyA3EDA.core.extractors.profile_extractor import ProfileExtractor
                     extractor = ProfileExtractor(combo_data[data_key])
-                    catalyst_profiles = extractor.extract_profiles()
-                    for catalyst, profile_data in catalyst_profiles.items():
-                        if profile_data:
-                            profile_path = profiles_dir / f"{calc_mode}_profile_{method_combo}_{catalyst}.csv"
-                            if write_csv_data(profile_data, profile_path, "profile"):
+                    
+                    # Get all profiles at once
+                    all_profiles = extractor.extract_profiles(filter_duplicates=True)
+
+                    for catalyst, catalyst_data in all_profiles.items():
+                        # Raw profiles
+                        if catalyst_data["raw"] and write_csv_data(catalyst_data["raw"], raw_data_dir / f"raw_{calc_mode}_profile_{method_combo}_{catalyst}.csv", "raw profile"):
+                            combo_files += 1
+                        
+                        # Filtered profiles (E and G)
+                        for energy_type in ["E", "G"]:
+                            if catalyst_data[energy_type] and write_csv_data(catalyst_data[energy_type], profiles_dir / f"{calc_mode}_profile_{energy_type}_{method_combo}_{catalyst}.csv", f"filtered {energy_type} profile"):
                                 combo_files += 1
                     
             # Export XYZ data
