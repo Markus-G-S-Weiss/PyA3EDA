@@ -29,4 +29,6 @@ def parse_arguments():
     parser.add_argument("--sp-strategy", type=str, default="smart",
                         choices=["always", "smart", "never"],
                         help="Control SP file generation: 'always' (always generate), 'smart' (only when opt output exists), 'never' (skip SP files)")
+    parser.add_argument("--no-plots", action="store_true",
+                        help="Disable automatic plot generation during data extraction")
     return parser.parse_args()
