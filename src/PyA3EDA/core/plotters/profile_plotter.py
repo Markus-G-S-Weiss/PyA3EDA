@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 import matplotlib
-matplotlib.use('Agg')  # Non-interactive backend
+matplotlib.use('PDF')  # Non-interactive backend
 import matplotlib.pyplot as plt
 
 
