@@ -51,7 +51,9 @@ class WorkflowManager:
 
     def extract_data(self) -> None:
         """
-        Extract, transform, load, and plot data.
+        Extracts all relevant calculation data based on the extraction criteria (default: "SUCCESSFUL"), 
+        transforms and processes the data, exports the processed results, and generates profile plots 
+        unless the --no-plots flag is specified in the arguments.
         """
         from PyA3EDA.core.extractors.data_extractor import extract_all_data
         from PyA3EDA.core.extractors.profile_extractor_functional import process_all_profiles

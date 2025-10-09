@@ -434,7 +434,7 @@ def _extract_eda_sp(sp_content: str, calc_type: str, metadata: Dict[str, Any], o
             final_energy_kcal += sp_cds_kcal
 
     # Apply BSSE correction for full_cat
-    if calc_type in ["full_cat"]:
+    if calc_type == "full_cat":
         bsse_data = parse_bsse_energy(sp_content)
         if bsse_data:
             bsse_kj = bsse_data["bsse_energy (kJ/mol)"]
