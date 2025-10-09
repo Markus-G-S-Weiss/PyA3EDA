@@ -92,11 +92,8 @@ def extract_opt_data(file_path: Path, metadata: Dict[str, Any], criteria: str = 
     Returns:
         Dictionary with extracted OPT data or None if extraction fails
     """
-    # Get corresponding input file for status checking
-    input_path = file_path.with_suffix(".in")
-    
     # Check if file should be processed with enhanced OPT validation
-    should_process, reason = should_process_file(input_path, criteria, metadata)
+    should_process, reason = should_process_file(file_path, criteria, metadata)
     if not should_process:
         logging.debug(f"Skipping file {reason}: {file_path}")
         return None
@@ -135,11 +132,8 @@ def extract_sp_data(file_path: Path, metadata: Dict[str, Any], criteria: str = "
     Returns:
         Dictionary with extracted SP data or None if extraction fails
     """
-    # Get corresponding input file for status checking
-    input_path = file_path.with_suffix(".in")
-    
     # Check if file should be processed
-    should_process, reason = should_process_file(input_path, criteria, metadata)
+    should_process, reason = should_process_file(file_path, criteria, metadata)
     if not should_process:
         logging.debug(f"Skipping file {reason}: {file_path}")
         return None
@@ -177,11 +171,8 @@ def extract_xyz_data(file_path: Path, metadata: Dict[str, Any], criteria: str = 
     Returns:
         Dictionary with coordinate data or None if extraction fails
     """
-    # Get corresponding input file for status checking
-    input_path = file_path.with_suffix(".in")
-    
     # Check if file should be processed
-    should_process, reason = should_process_file(input_path, criteria, metadata)
+    should_process, reason = should_process_file(file_path, criteria, metadata)
     if not should_process:
         logging.debug(f"Skipping XYZ extraction for {file_path.name}: {reason}")
         return None
@@ -404,9 +395,9 @@ def _extract_eda_sp(sp_content: str, calc_type: str, metadata: Dict[str, Any], o
     data = {}
     
     # Determine EDA type and extract base energy
-    if calc_type in ["frz_cat", "pol_cat"]:
+    if calc_type == "pol_cat":
         base_energy_ha = parse_eda_polarized_energy(sp_content)
-    elif calc_type == "full_cat":
+    elif calc_type in ["frz_cat", "full_cat"]:
         base_energy_ha = parse_eda_convergence_energy(sp_content)
     else:
         logging.warning(f"Unknown EDA calc_type: {calc_type}")
@@ -442,8 +433,8 @@ def _extract_eda_sp(sp_content: str, calc_type: str, metadata: Dict[str, Any], o
             final_energy_ha += sp_cds_ha
             final_energy_kcal += sp_cds_kcal
 
-    # Apply BSSE correction for pol_cat and full_cat
-    if calc_type in ["pol_cat", "full_cat"]:
+    # Apply BSSE correction for full_cat
+    if calc_type == "full_cat":
         bsse_data = parse_bsse_energy(sp_content)
         if bsse_data:
             bsse_kj = bsse_data["bsse_energy (kJ/mol)"]

@@ -51,19 +51,23 @@ class WorkflowManager:
 
     def extract_data(self) -> None:
         """
-        Extract and export data with proper separation of concerns.
+        Extracts all relevant calculation data based on the extraction criteria (default: "SUCCESSFUL"), 
+        transforms and processes the data, exports the processed results, and generates profile plots 
+        unless the --no-plots flag is specified in the arguments.
         """
         from PyA3EDA.core.extractors.data_extractor import extract_all_data
-        from PyA3EDA.core.exporters.data_exporter import export_all_combos
+        from PyA3EDA.core.extractors.profile_extractor_functional import process_all_profiles
+        from PyA3EDA.core.exporters.data_exporter import export_all_data
+        from PyA3EDA.core.plotters.profile_plotter import plot_all_profiles
         
         criteria = getattr(self.args, 'extract', None) if self.args else "SUCCESSFUL"
         
-        # Step 1: Extract data (pure extraction, no export)
-        extracted_data = extract_all_data(self.config_manager, self.system_dir, criteria)
+        # Extract-Transform-Load pipeline
+        raw_data = extract_all_data(self.config_manager, self.system_dir, criteria)
+        processed_data = process_all_profiles(raw_data)
+        export_all_data(processed_data, self.system_dir)
         
-        # Step 2: Export data (if any was extracted)
-        if extracted_data:
-            export_all_combos(extracted_data, self.system_dir, enable_profiles=True)
-            logging.info("Data extraction and export completed successfully")
-        else:
-            logging.warning("No data extracted - nothing to export")
+        # Generate plots by default (can be disabled with --no-plots)
+        generate_plots = not getattr(self.args, 'no_plots', False) if self.args else True
+        if generate_plots:
+            plot_all_profiles(processed_data, self.system_dir)

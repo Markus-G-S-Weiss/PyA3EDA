@@ -265,7 +265,7 @@ def parse_smd_cds_extended_print(content: str) -> Optional[float]:
 
 
 def parse_eda_polarized_energy(content: str, prefix: str = "SP_E") -> Optional[Dict[str, Any]]:
-    """Parse polarized energy from EDA SP calculations (frz/pol types)."""
+    """Parse polarized energy from EDA SP calculations (pol types)."""
     result, _ = extract_with_pattern(content, PATTERNS["eda_polarized_energy"], default_unit="Ha")
     
     if result is not None:
@@ -279,7 +279,7 @@ def parse_eda_polarized_energy(content: str, prefix: str = "SP_E") -> Optional[D
 
 
 def parse_eda_convergence_energy(content: str, prefix: str = "SP_E") -> Optional[Dict[str, Any]]:
-    """Parse full energy from EDA SP calculations (full type)."""
+    """Parse full energy from EDA SP calculations (frz/full type)."""
     result, _ = extract_with_pattern(content, PATTERNS["eda_convergence_energy"], default_unit="Ha")
     
     if result is not None:
