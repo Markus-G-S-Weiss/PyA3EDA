@@ -30,13 +30,18 @@ def convert_energy_unit(value: float, unit: str, target_unit: str = "kcal/mol") 
     jmol_units = {"j/mol"}
     calmolkelvin_units = {"cal/mol.k"}
     kcalmolkelvin_units = {"kcal/mol.k"}
+    atm_units = {"atm"}
+    pa_units = {"pa", "pascal"}
     
     # Check if source and target are equivalent (same unit group)
     if ((unit_lower in hartree_units and target_lower in hartree_units) or
         (unit_lower in kcalmol_units and target_lower in kcalmol_units) or
         (unit_lower in kjmol_units and target_lower in kjmol_units) or
+        (unit_lower in jmol_units and target_lower in jmol_units) or
         (unit_lower in calmolkelvin_units and target_lower in calmolkelvin_units) or
-        (unit_lower in kcalmolkelvin_units and target_lower in kcalmolkelvin_units)):
+        (unit_lower in kcalmolkelvin_units and target_lower in kcalmolkelvin_units) or
+        (unit_lower in atm_units and target_lower in atm_units) or
+        (unit_lower in pa_units and target_lower in pa_units)):
         return value
     
     # Handle Hartree to kcal/mol conversion
@@ -70,6 +75,14 @@ def convert_energy_unit(value: float, unit: str, target_unit: str = "kcal/mol") 
     # Handle J/mol to kcal/mol conversion
     if unit_lower in jmol_units and target_lower in kcalmol_units:
         return value * Constants.TO_KILO * Constants.KJMOL_TO_KCALMOL
+    
+    # Handle atm to Pa conversion
+    if unit_lower in atm_units and target_lower in pa_units:
+        return value * Constants.ATM_TO_PA
+    
+    # Handle Pa to atm conversion
+    if unit_lower in pa_units and target_lower in atm_units:
+        return value / Constants.ATM_TO_PA
 
     # If we don't know how to convert, log warning and return original
     logging.warning(f"Unrecognized unit conversion: {unit} to {target_unit}. Returning original value.")
