@@ -21,7 +21,7 @@ class Constants:
             HARTREE_TO_KCALMOL: Hartree to kilocalories per mole (kcal/mol)
             KJMOL_TO_HARTREE: kilojoules per mole to Hartree (not from CODATA 2022, used for back conversion until value is adjusted internally)
             BOLTZMANN: Boltzmann constant (J/K)
-            MOLAR_GAS_CONSTANT: Gas constant R (J/(mol·K))
+            MOLAR_GAS_CONSTANT: Gas constant R (J/(mol.K))
             M3_TO_L: cubic meter to liters (L)
     """
     HARTREE_TO_J=4.3597447222060e-18 # Hartree to J
@@ -35,7 +35,7 @@ class Constants:
     KJMOL_TO_HARTREE = 1.0 / 2625.5311584660003 # value for bsse conversion
 
     BOLTZMANN = 1.380649e-23 # Boltzmann constant in J/K
-    R_J_MOL_K = AVOGADRO * BOLTZMANN # Gas constant R in J/(mol·K)
+    MOLAR_GAS_CONSTANT = AVOGADRO * BOLTZMANN # Gas constant R in J/(mol.K)
     ATM_TO_PA = 101325.0 # 1 atm = 101325 Pa
     M3_TO_L = 1000.0 # cubic meter (m^3) = 1000 liters (L) = 1000 dm^3
 
