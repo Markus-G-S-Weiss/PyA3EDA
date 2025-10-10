@@ -25,7 +25,8 @@ from PyA3EDA.core.parsers.qchem_result_parser import (
 )
 from PyA3EDA.core.parsers.output_xyz_parser import parse_qchem_output_xyz
 from PyA3EDA.core.status.status_checker import should_process_file
-from PyA3EDA.core.utils.unit_converter import convert_energy_unit
+from PyA3EDA.core.utils.unit_converter import convert_unit
+from PyA3EDA.core.utils.thermodynamics import calculate_standard_state_correction
 from PyA3EDA.core.builders.builder import iter_input_paths
 
 
@@ -286,9 +287,9 @@ def extract_smd_detail_block_data(content: str) -> Dict[str, Any]:
         
         data.update({
             "G_S (Ha)": g_s_ha,
-            "G_S (kcal/mol)": convert_energy_unit(g_s_ha, "Ha", "kcal/mol"),
+            "G_S (kcal/mol)": convert_unit(g_s_ha, "Ha", "kcal/mol"),
             "G_ENP (Ha)": g_enp_ha,
-            "G_ENP (kcal/mol)": convert_energy_unit(g_enp_ha, "Ha", "kcal/mol"),
+            "G_ENP (kcal/mol)": convert_unit(g_enp_ha, "Ha", "kcal/mol"),
             "G_CDS (Ha)": g_cds_ha,
             "G_CDS (kcal/mol)": g_cds_detail_kcal
         })
@@ -310,7 +311,7 @@ def extract_cds_extended_print(sp_content: str) -> Dict[str, Any]:
         return {}
     
     # Convert to Hartree and prepare data
-    sp_cds_ha = convert_energy_unit(sp_cds_kcal, "kcal/mol", "Ha")
+    sp_cds_ha = convert_unit(sp_cds_kcal, "kcal/mol", "Ha")
     
     data.update({
         "G_CDS (Ha)": sp_cds_ha,
@@ -341,7 +342,7 @@ def validate_cds_against_opt(sp_cds_kcal: float, opt_content: str) -> Dict[str, 
         g_s_ha = opt_detail_data["g_s_final"]
         g_enp_ha = opt_detail_data["g_enp_final"]
         g_cds_ha = g_s_ha - g_enp_ha
-        opt_cds_kcal = convert_energy_unit(g_cds_ha, "Ha", "kcal/mol")
+        opt_cds_kcal = convert_unit(g_cds_ha, "Ha", "kcal/mol")
     elif "cds_summary_final" in opt_detail_data:
         # Fallback to summary value
         opt_cds_kcal = opt_detail_data["cds_summary_final"]
@@ -409,7 +410,7 @@ def _extract_eda_sp(sp_content: str, calc_type: str, metadata: Dict[str, Any], o
     
     # Start with base energy
     final_energy_ha = base_energy_ha["SP_E (Ha)"]
-    final_energy_kcal = convert_energy_unit(final_energy_ha, "Ha", "kcal/mol")
+    final_energy_kcal = convert_unit(final_energy_ha, "Ha", "kcal/mol")
 
     # Apply SMD CDS correction if solvent is used - simplified validation logic
     sp_solvent = metadata.get("SP_Solvent", "gas").lower()
@@ -438,8 +439,8 @@ def _extract_eda_sp(sp_content: str, calc_type: str, metadata: Dict[str, Any], o
         bsse_data = parse_bsse_energy(sp_content)
         if bsse_data:
             bsse_kj = bsse_data["bsse_energy (kJ/mol)"]
-            bsse_ha = convert_energy_unit(bsse_kj, "kJ/mol", "Ha")
-            bsse_kcal = convert_energy_unit(bsse_kj, "kJ/mol", "kcal/mol")
+            bsse_ha = convert_unit(bsse_kj, "kJ/mol", "Ha")
+            bsse_kcal = convert_unit(bsse_kj, "kJ/mol", "kcal/mol")
             
             data.update({
                 "SP_BSSE (kJ/mol)": bsse_kj,
@@ -477,23 +478,51 @@ def apply_thermodynamic_corrections(data: Dict[str, Any], opt_content: str) -> N
 
 
 def calculate_enthalpy_and_gibbs(data: Dict[str, Any], mode: str) -> None:
-    """
-    Calculate derived thermodynamic values (H and G) in place.
+    """Calculate H and G with optional solvent correction.
     
     Args:
-        data: Dictionary containing energy and thermodynamic correction data
-        mode: Calculation mode - "sp" uses SP_E, "opt" uses E
+        data: Dictionary with energy and thermodynamic corrections.
+        mode: "sp" or "opt" (determines which keys to use).
     """
-    # Determine base energy key based on calculation type
-    base_energy_key = "SP_E (kcal/mol)" if mode == "sp" else "E (kcal/mol)"
+    base_energy_key = f"{'SP_' if mode == 'sp' else ''}E (kcal/mol)"
     
-    # Calculate H (kcal/mol)
+    # Calculate H = E + H_corr
     if base_energy_key in data and "Total Enthalpy Corr. (kcal/mol)" in data:
         data["H (kcal/mol)"] = data[base_energy_key] + data["Total Enthalpy Corr. (kcal/mol)"]
+        logging.debug(f"{mode.upper()}: Calculated H = {data['H (kcal/mol)']:.6f} kcal/mol")
+    else:
+        logging.debug(f"{mode.upper()}: Skipping H calculation - missing energy or enthalpy correction")
 
-    # Calculate G (kcal/mol)
-    if all(key in data for key in ["H (kcal/mol)", "Temperature (K)", "Total Entropy Corr. (kcal/mol.K)"]):
-        data["G (kcal/mol)"] = data["H (kcal/mol)"] - data["Temperature (K)"] * data["Total Entropy Corr. (kcal/mol.K)"]
+    # Calculate G = H - T*S_corr
+    required_keys = ["H (kcal/mol)", "Temperature (K)", "Total Entropy Corr. (kcal/mol.K)"]
+    if not all(k in data for k in required_keys):
+        missing_keys = [k for k in required_keys if k not in data]
+        logging.debug(f"{mode.upper()}: Skipping G calculation - missing keys: {missing_keys}")
+        return
+    
+    g_gas = data["H (kcal/mol)"] - data["Temperature (K)"] * data["Total Entropy Corr. (kcal/mol.K)"]
+    data["G(gas) (kcal/mol)"] = g_gas
+    data["G (kcal/mol)"] = g_gas
+    logging.debug(f"{mode.upper()}: Calculated G(gas) = {g_gas:.6f} kcal/mol at T={data['Temperature (K)']} K")
+    
+    # Apply solvent correction if any solvent model is used (not gas phase)
+    solvent_key = f"{'SP_' if mode == 'sp' else ''}Solvent"
+    solvent = data.get(solvent_key, "gas").lower()
+    if solvent != "gas" and all(k in data for k in ["Temperature (K)", "Pressure (atm)"]):
+        temperature = data["Temperature (K)"]
+        pressure = data["Pressure (atm)"]
+        correction = calculate_standard_state_correction(temperature, pressure)
+        g_solvent = g_gas + correction
+        data["G(1M) (kcal/mol)"] = g_solvent
+        data["Standard State Corr. (kcal/mol)"] = correction
+        data["G (kcal/mol)"] = g_solvent
+        logging.debug(f"{mode.upper()}: Applied standard state correction for {solvent}: "
+                     f"dG = {correction:.6f} kcal/mol (T={temperature} K, P={pressure} atm)")
+        logging.debug(f"{mode.upper()}: G(1M) = {g_solvent:.6f} kcal/mol")
+    elif solvent != "gas":
+        logging.debug(f"{mode.upper()}: Skipping standard state correction for {solvent} - missing temperature or pressure")
+    else:
+        logging.debug(f"{mode.upper()}: Gas phase calculation - no standard state correction applied")
 
 
 # MAIN EXTRACTION FUNCTION

@@ -19,7 +19,7 @@ from PyA3EDA.core.parsers.qchem_result_parser import (
 )
 from PyA3EDA.core.parsers.output_xyz_parser import parse_qchem_output_xyz
 from PyA3EDA.core.status.status_checker import should_process_file
-from PyA3EDA.core.utils.unit_converter import convert_energy_unit
+from PyA3EDA.core.utils.unit_converter import convert_unit
 from PyA3EDA.core.builders.builder import iter_input_paths
 
 
@@ -326,7 +326,7 @@ def _extract_eda_sp_energy(sp_content: str, eda_type: str, metadata: Dict[str, A
         }
     
     # Convert base energy and set columns
-    base_energy_kcal = convert_energy_unit(base_energy_ha, "Ha", "kcal/mol")
+    base_energy_kcal = convert_unit(base_energy_ha, "Ha", "kcal/mol")
     data.update({
         "SP_E_base (Ha)": base_energy_ha,
         "SP_E_base (kcal/mol)": base_energy_kcal
@@ -358,8 +358,8 @@ def _extract_eda_sp_energy(sp_content: str, eda_type: str, metadata: Dict[str, A
         bsse_data = parse_bsse_energy(sp_content)
         if bsse_data:
             bsse_kj = bsse_data["bsse_energy"]
-            bsse_value_kcal = convert_energy_unit(bsse_kj, "kJ/mol", "kcal/mol")
-            bsse_value_ha = convert_energy_unit(bsse_kj, "kJ/mol", "Ha")
+            bsse_value_kcal = convert_unit(bsse_kj, "kJ/mol", "kcal/mol")
+            bsse_value_ha = convert_unit(bsse_kj, "kJ/mol", "Ha")
             
             # Set BSSE correction columns and update final energy
             data.update({
@@ -408,7 +408,7 @@ def _extract_smd_cds_energy(opt_content: str = None, sp_content: str = None) -> 
                 g_s_final = opt_raw_data["g_s_final"]
                 g_enp_final = opt_raw_data["g_enp_final"]
                 cds_hartree = g_s_final - g_enp_final
-                primary_value = convert_energy_unit(cds_hartree, "Ha", "kcal/mol")
+                primary_value = convert_unit(cds_hartree, "Ha", "kcal/mol")
                 primary_source = "opt_calculated_from_components"
                 
                 # Validation 1: Against OPT summary (4 decimal tolerance)
