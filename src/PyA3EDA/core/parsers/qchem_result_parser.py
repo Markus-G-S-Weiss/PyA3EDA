@@ -8,7 +8,7 @@ Returns raw parsed values that can be further processed by extraction logic.
 import re
 from typing import Optional, Tuple, Dict, Any, Pattern, List
 
-from PyA3EDA.core.utils.unit_converter import convert_energy_unit
+from PyA3EDA.core.utils.unit_converter import convert_unit
 
 
 # Regex patterns for data extraction
@@ -118,7 +118,7 @@ def parse_final_energy(content: str, prefix: str = "E") -> Optional[Dict[str, An
         energy_value, energy_unit = result
         return {
             f"{prefix} ({energy_unit})": energy_value,
-            f"{prefix} (kcal/mol)": convert_energy_unit(energy_value, energy_unit, "kcal/mol")
+            f"{prefix} (kcal/mol)": convert_unit(energy_value, energy_unit, "kcal/mol")
         }
     return None
 
@@ -131,7 +131,7 @@ def parse_total_energy(content: str, prefix: str = "E") -> Optional[Dict[str, An
         energy_value, energy_unit = result
         return {
             f"{prefix} ({energy_unit})": energy_value,
-            f"{prefix} (kcal/mol)": convert_energy_unit(energy_value, energy_unit, "kcal/mol")
+            f"{prefix} (kcal/mol)": convert_unit(energy_value, energy_unit, "kcal/mol")
         }
     return None
 
@@ -145,7 +145,7 @@ def parse_energy(content: str, prefix: str = "E") -> Optional[Dict[str, Any]]:
         energy_value, energy_unit = result
         return {
             f"{prefix} ({energy_unit})": energy_value,
-            f"{prefix} (kcal/mol)": convert_energy_unit(energy_value, energy_unit, "kcal/mol"),
+            f"{prefix} (kcal/mol)": convert_unit(energy_value, energy_unit, "kcal/mol"),
             "energy_fallback_used": fallback_used
         }
     return None
@@ -159,7 +159,7 @@ def parse_enthalpy(content: str) -> Optional[Dict[str, Any]]:
     if result is not None:
         enthalpy_value, enthalpy_unit = result
         return {
-            "Total Enthalpy Corr. (kcal/mol)": convert_energy_unit(enthalpy_value, enthalpy_unit, "kcal/mol"),
+            "Total Enthalpy Corr. (kcal/mol)": convert_unit(enthalpy_value, enthalpy_unit, "kcal/mol"),
             "enthalpy_fallback_used": fallback_used
         }
     return None
@@ -173,7 +173,7 @@ def parse_entropy(content: str) -> Optional[Dict[str, Any]]:
     if result is not None:
         entropy_value, entropy_unit = result
         return {
-            "Total Entropy Corr. (kcal/mol.K)": convert_energy_unit(entropy_value, entropy_unit, "kcal/mol.K"),
+            "Total Entropy Corr. (kcal/mol.K)": convert_unit(entropy_value, entropy_unit, "kcal/mol.K"),
             "entropy_fallback_used": fallback_used
         }
     return None
@@ -273,7 +273,7 @@ def parse_eda_polarized_energy(content: str, prefix: str = "SP_E") -> Optional[D
         energy_value = result if isinstance(result, (int, float)) else result[0]
         return {
             f"{prefix} (Ha)": energy_value,
-            f"{prefix} (kcal/mol)": convert_energy_unit(energy_value, "Ha", "kcal/mol")
+            f"{prefix} (kcal/mol)": convert_unit(energy_value, "Ha", "kcal/mol")
         }
     return None
 
@@ -287,7 +287,7 @@ def parse_eda_convergence_energy(content: str, prefix: str = "SP_E") -> Optional
         energy_value = result if isinstance(result, (int, float)) else result[0]
         return {
             f"{prefix} (Ha)": energy_value,
-            f"{prefix} (kcal/mol)": convert_energy_unit(energy_value, "Ha", "kcal/mol")
+            f"{prefix} (kcal/mol)": convert_unit(energy_value, "Ha", "kcal/mol")
         }
     return None
 
@@ -301,6 +301,6 @@ def parse_bsse_energy(content: str) -> Optional[Dict[str, Any]]:
         energy_value = result if isinstance(result, (int, float)) else result[0]
         return {
             "bsse_energy (kJ/mol)": energy_value,
-            "bsse_energy (kcal/mol)": convert_energy_unit(energy_value, "kJ/mol", "kcal/mol")
+            "bsse_energy (kcal/mol)": convert_unit(energy_value, "kJ/mol", "kcal/mol")
         }
     return None

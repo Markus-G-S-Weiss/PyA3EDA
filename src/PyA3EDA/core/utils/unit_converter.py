@@ -7,7 +7,7 @@ Provides functions for converting between different energy units in computationa
 import logging
 from PyA3EDA.core.constants import Constants
 
-def convert_energy_unit(value: float, unit: str, target_unit: str = "kcal/mol") -> float:
+def convert_unit(value: float, unit: str, target_unit: str = "kcal/mol") -> float:
     """
     Convert energy value from source unit to target unit.
     

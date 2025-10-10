@@ -25,7 +25,7 @@ from PyA3EDA.core.parsers.qchem_result_parser import (
 )
 from PyA3EDA.core.parsers.output_xyz_parser import parse_qchem_output_xyz
 from PyA3EDA.core.status.status_checker import should_process_file
-from PyA3EDA.core.utils.unit_converter import convert_energy_unit
+from PyA3EDA.core.utils.unit_converter import convert_unit
 from PyA3EDA.core.utils.thermodynamics import calculate_standard_state_correction
 from PyA3EDA.core.builders.builder import iter_input_paths
 
@@ -287,9 +287,9 @@ def extract_smd_detail_block_data(content: str) -> Dict[str, Any]:
         
         data.update({
             "G_S (Ha)": g_s_ha,
-            "G_S (kcal/mol)": convert_energy_unit(g_s_ha, "Ha", "kcal/mol"),
+            "G_S (kcal/mol)": convert_unit(g_s_ha, "Ha", "kcal/mol"),
             "G_ENP (Ha)": g_enp_ha,
-            "G_ENP (kcal/mol)": convert_energy_unit(g_enp_ha, "Ha", "kcal/mol"),
+            "G_ENP (kcal/mol)": convert_unit(g_enp_ha, "Ha", "kcal/mol"),
             "G_CDS (Ha)": g_cds_ha,
             "G_CDS (kcal/mol)": g_cds_detail_kcal
         })
@@ -311,7 +311,7 @@ def extract_cds_extended_print(sp_content: str) -> Dict[str, Any]:
         return {}
     
     # Convert to Hartree and prepare data
-    sp_cds_ha = convert_energy_unit(sp_cds_kcal, "kcal/mol", "Ha")
+    sp_cds_ha = convert_unit(sp_cds_kcal, "kcal/mol", "Ha")
     
     data.update({
         "G_CDS (Ha)": sp_cds_ha,
@@ -342,7 +342,7 @@ def validate_cds_against_opt(sp_cds_kcal: float, opt_content: str) -> Dict[str, 
         g_s_ha = opt_detail_data["g_s_final"]
         g_enp_ha = opt_detail_data["g_enp_final"]
         g_cds_ha = g_s_ha - g_enp_ha
-        opt_cds_kcal = convert_energy_unit(g_cds_ha, "Ha", "kcal/mol")
+        opt_cds_kcal = convert_unit(g_cds_ha, "Ha", "kcal/mol")
     elif "cds_summary_final" in opt_detail_data:
         # Fallback to summary value
         opt_cds_kcal = opt_detail_data["cds_summary_final"]
@@ -410,7 +410,7 @@ def _extract_eda_sp(sp_content: str, calc_type: str, metadata: Dict[str, Any], o
     
     # Start with base energy
     final_energy_ha = base_energy_ha["SP_E (Ha)"]
-    final_energy_kcal = convert_energy_unit(final_energy_ha, "Ha", "kcal/mol")
+    final_energy_kcal = convert_unit(final_energy_ha, "Ha", "kcal/mol")
 
     # Apply SMD CDS correction if solvent is used - simplified validation logic
     sp_solvent = metadata.get("SP_Solvent", "gas").lower()
@@ -439,8 +439,8 @@ def _extract_eda_sp(sp_content: str, calc_type: str, metadata: Dict[str, Any], o
         bsse_data = parse_bsse_energy(sp_content)
         if bsse_data:
             bsse_kj = bsse_data["bsse_energy (kJ/mol)"]
-            bsse_ha = convert_energy_unit(bsse_kj, "kJ/mol", "Ha")
-            bsse_kcal = convert_energy_unit(bsse_kj, "kJ/mol", "kcal/mol")
+            bsse_ha = convert_unit(bsse_kj, "kJ/mol", "Ha")
+            bsse_kcal = convert_unit(bsse_kj, "kJ/mol", "kcal/mol")
             
             data.update({
                 "SP_BSSE (kJ/mol)": bsse_kj,

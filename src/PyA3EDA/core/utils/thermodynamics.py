@@ -10,7 +10,7 @@ References:
 import math
 
 from PyA3EDA.core.constants import Constants
-from PyA3EDA.core.utils.unit_converter import convert_energy_unit
+from PyA3EDA.core.utils.unit_converter import convert_unit
 
 
 def calculate_standard_state_correction(temperature: float, pressure: float) -> float:
@@ -29,7 +29,7 @@ def calculate_standard_state_correction(temperature: float, pressure: float) -> 
 
 
     """
-    pressure_pa = convert_energy_unit(pressure, "atm", "Pa")
-    ratio = (Constants.R_J_MOL_K * temperature * Constants.M3_TO_L) / pressure_pa
-    correction_j_mol = Constants.R_J_MOL_K * temperature * math.log(ratio)
-    return convert_energy_unit(correction_j_mol, "J/mol", "kcal/mol")
+    pressure_pa = convert_unit(pressure, "atm", "Pa")
+    ratio = (Constants.MOLAR_GAS_CONSTANT * temperature * Constants.M3_TO_L) / pressure_pa
+    correction_j_mol = Constants.MOLAR_GAS_CONSTANT * temperature * math.log(ratio)
+    return convert_unit(correction_j_mol, "J/mol", "kcal/mol")
