@@ -27,6 +27,7 @@ def convert_energy_unit(value: float, unit: str, target_unit: str = "kcal/mol") 
     hartree_units = {"hartree", "ha", "a.u."}
     kcalmol_units = {"kcal/mol"}
     kjmol_units = {"kj/mol"}
+    jmol_units = {"j/mol"}
     calmolkelvin_units = {"cal/mol.k"}
     kcalmolkelvin_units = {"kcal/mol.k"}
     
@@ -66,6 +67,10 @@ def convert_energy_unit(value: float, unit: str, target_unit: str = "kcal/mol") 
     if unit_lower in calmolkelvin_units and target_lower in kcalmolkelvin_units:
         return value * Constants.TO_KILO
     
+    # Handle J/mol to kcal/mol conversion
+    if unit_lower in jmol_units and target_lower in kcalmol_units:
+        return value * Constants.TO_KILO * Constants.KJMOL_TO_KCALMOL
+
     # If we don't know how to convert, log warning and return original
     logging.warning(f"Unrecognized unit conversion: {unit} to {target_unit}. Returning original value.")
     return value
