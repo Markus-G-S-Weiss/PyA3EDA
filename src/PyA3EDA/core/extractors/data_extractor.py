@@ -105,17 +105,11 @@ def extract_opt_data(file_path: Path, metadata: Dict[str, Any], criteria: str = 
         logging.warning(f"Could not read content from: {file_path}")
         return None
     
-    # Extract thermodynamic data
-    thermo_data = extract_opt_thermodynamic_data(content)
-    if not thermo_data:
+    # Extract thermodynamic data (includes metadata and H/G calculation)
+    data = extract_opt_thermodynamic_data(content, metadata)
+    if not data:
         logging.warning(f"Failed to extract thermodynamic data from: {file_path}")
         return None
-    
-    # Start with clean metadata extraction
-    data = _extract_opt_metadata(metadata)
-    
-    # Add extracted thermodynamic data
-    data.update(thermo_data)
     
     return data
 
@@ -145,17 +139,11 @@ def extract_sp_data(file_path: Path, metadata: Dict[str, Any], criteria: str = "
         logging.warning(f"Could not read content from: {file_path}")
         return None
     
-    # Extract SP thermodynamic data
-    thermo_data = extract_sp_thermodynamic_data(content, metadata, opt_content)
-    if not thermo_data:
+    # Extract SP thermodynamic data (includes metadata and H/G calculation)
+    data = extract_sp_thermodynamic_data(content, metadata, opt_content)
+    if not data:
         logging.warning(f"Failed to extract SP data from: {file_path}")
         return None
-    
-    # Start with clean metadata extraction
-    data = _extract_sp_metadata(metadata)
-    
-    # Add extracted SP thermodynamic data
-    data.update(thermo_data)
     
     return data
 
@@ -200,7 +188,7 @@ def extract_xyz_data(file_path: Path, metadata: Dict[str, Any], criteria: str = 
         return None
 
 
-def extract_opt_thermodynamic_data(content: str) -> Dict[str, Any]:
+def extract_opt_thermodynamic_data(content: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
     """Extract thermodynamic data from OPT calculation."""
     data = {}
 
@@ -233,7 +221,8 @@ def extract_opt_thermodynamic_data(content: str) -> Dict[str, Any]:
     if opt_status := parse_optimization_status(content):
         data.update(opt_status)
     
-    # Calculate derived values for OPT data
+    # Calculate H and G with metadata context (need Solvent key)
+    data.update(metadata)
     calculate_enthalpy_and_gibbs(data, mode="opt")
 
     return data
@@ -260,7 +249,8 @@ def extract_sp_thermodynamic_data(sp_content: str, metadata: Dict[str, Any], opt
     if opt_content:
         apply_thermodynamic_corrections(data, opt_content)
     
-    # Calculate derived values for SP data
+    # Calculate H and G with metadata context (need SP_Solvent key)
+    data.update(metadata)
     calculate_enthalpy_and_gibbs(data, mode="sp")
     
     return data
