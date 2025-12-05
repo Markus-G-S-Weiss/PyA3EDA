@@ -102,69 +102,71 @@ from PyA3EDA.core.builders.molecule_builder import (
 from PyA3EDA.core.builders import rem_builder
 
 
-def get_molecule_section(template: str, molecule_processing_fn, species: str, 
+def get_molecule_section(molecule_processing_fn, species: str, template_prefix: str = "",
                          catalyst: str = None, mode: str = "opt", 
-                         opt_output_path: Path = None, system_dir: Path = None) -> str:
+                         opt_output_path: Path = None, system_dir: Path = None, 
+                         calc_type: str = None) -> str:
     """
     Returns the molecule section of the input file.
     
     Args:
-        template: Template string for the molecule section
         molecule_processing_fn: Function to process the molecule section
         species: Species name
+        template_prefix: Prefix for template filename (e.g., "ts_", "preTS_")
         catalyst: Catalyst name (optional)
         mode: Mode ("opt" or "sp")
         opt_output_path: Path to the optimization output file (for sp mode)
-        system_dir: System directory to locate catalyst/substrate templates
+        system_dir: System directory to locate molecule templates
+        calc_type: Calculation type for calc-type-specific templates (e.g., "frz_cat")
         
     Returns:
         Processed molecule section string
     """
+    def load_xyz(identifier: str) -> str:
+        """Load XYZ template, trying calc_type-specific version first."""
+        templates_dir = system_dir / "templates" / "molecule"
+        for suffix in ([f"_{calc_type}", ""] if calc_type else [""]):
+            path = templates_dir / f"{identifier}{suffix}.xyz"
+            if path.exists() and (content := read_text(path)):
+                return content
+        # Only log error if no template found at all (after trying all suffixes)
+        logging.error(f"Missing template: {templates_dir / f'{identifier}.xyz'}")
+        return None
+    
+    # Load the main composite/species template
+    template_name = f"{template_prefix}{species}"
+    composite_xyz_text = load_xyz(template_name)
+    if not composite_xyz_text:
+        logging.error(f"Failed to load molecule template for {species}")
+        return None
+    
     # For SP mode, read the optimization output
-    output_text = None
-    if mode == "sp" and opt_output_path and opt_output_path.exists():
-        output_text = read_text(opt_output_path)
+    output_text = read_text(opt_output_path) if mode == "sp" and opt_output_path and opt_output_path.exists() else None
     
     # For fragmented molecule sections, load catalyst and substrate templates
-    catalyst_xyz_text = None
-    substrate_xyz_text = None
-    substrate_id = None
+    catalyst_xyz_text = substrate_xyz_text = substrate_id = None
     
     if molecule_processing_fn == build_fragmented_molecule_section and system_dir:
-        # Parse the species to get catalyst and substrate IDs
         parts = species.split("-")
         if len(parts) >= 2:
             cat_id = catalyst or parts[0]
             substrate_id = "-".join(parts[1:])
-            
-            # Load catalyst and substrate templates
-            catalyst_template_path = system_dir / "templates" / "molecule" / f"{cat_id}.xyz"
-            substrate_template_path = system_dir / "templates" / "molecule" / f"{substrate_id}.xyz"
-            
-            if catalyst_template_path.exists():
-                catalyst_xyz_text = read_text(catalyst_template_path)
-                if not catalyst_xyz_text:
-                    logging.error(f"Failed to read catalyst template: {catalyst_template_path}")
-            else:
-                logging.error(f"Missing catalyst template: {catalyst_template_path}")
-                
-            if substrate_template_path.exists():
-                substrate_xyz_text = read_text(substrate_template_path)
-                if not substrate_xyz_text:
-                    logging.error(f"Failed to read substrate template: {substrate_template_path}")
-            else:
-                logging.error(f"Missing substrate template: {substrate_template_path}")
+            catalyst_xyz_text = load_xyz(cat_id)
+            substrate_xyz_text = load_xyz(substrate_id)
     
     # Use the appropriate molecule building function
+    # Create unique identifier including calc_type for proper caching
+    unique_id = f"{template_name}_{calc_type}" if calc_type else template_name
+    
     if molecule_processing_fn == build_fragmented_molecule_section:
         return molecule_processing_fn(
-            template, species, 
+            composite_xyz_text, unique_id, 
             catalyst_xyz_text, substrate_xyz_text,
             catalyst, substrate_id,
             output_text
         )
     else:
-        return molecule_processing_fn(template, species, output_text)
+        return molecule_processing_fn(composite_xyz_text, unique_id, output_text)
 
 
 def get_rem_section(system_dir: Path, calc: str, rem: dict, category: str, branch: str,
@@ -175,18 +177,17 @@ def get_rem_section(system_dir: Path, calc: str, rem: dict, category: str, branc
     For SP mode, sets special parameters:
     - eda2: Set to 0 for no_cat or cat branch, otherwise from rem dict
     - scfmi_freeze_ss: Set to 1 for frz_cat calculations, 0 otherwise
+    - eda_bsse: Set to true only for full_cat calculations, false otherwise
     """
     if mode == "sp":
-        # Set eda2 parameter
         eda2 = "0" if category == "no_cat" or branch == "cat" else rem.get("eda2", "0")
-        
-        # Set scfmi_freeze_ss parameter
         scfmi_freeze_ss = "1" if calc == "frz_cat" else "0"
+        eda_bsse = "true" if calc == "full_cat" else "false"
         
         return rem_builder.build_rem_section_for_sp(
             system_dir, method, basis,
             rem.get("dispersion", "false"), rem.get("solvent", "false"),
-            eda2, scfmi_freeze_ss
+            eda2, scfmi_freeze_ss, eda_bsse
         )
     else:
         jobtype = "ts" if branch == "ts" else ("sp" if len(rem.get("molecule_section", "").splitlines()) - 1 == 1 else "opt")
@@ -279,7 +280,7 @@ def build_and_write_input_file(system_dir: Path,
                                species: str,
                                calc_type: str,
                                template_base_path: Path,
-                               molecule_template_path: Path,
+                               template_prefix: str,
                                molecule_proc_fn,
                                catalyst_name: str = "",
                                mode: str = "opt",
@@ -298,7 +299,7 @@ def build_and_write_input_file(system_dir: Path,
         species: Species name
         calc_type: Calculation type
         template_base_path: Path to base template file
-        molecule_template_path: Path to molecule template file
+        template_prefix: Prefix for template filename (e.g., "ts_", "preTS_")
         molecule_proc_fn: Function to process molecule section
         catalyst_name: Catalyst name (optional)
         mode: Mode (opt or sp)
@@ -390,23 +391,18 @@ def build_and_write_input_file(system_dir: Path,
         else:
             logging.warning(f"Solvent file not found: {solvent_file}")
     
-    # Load molecule template
-    molecule_template_raw = read_text(molecule_template_path)
-    if not molecule_template_raw:
-        logging.error(f"Failed to read molecule template: {molecule_template_path}")
-        return
-    
     # Generate molecule section
     try:
         # Get molecule section through the unified interface
         molecule_section = get_molecule_section(
-            template=molecule_template_raw,
             molecule_processing_fn=molecule_proc_fn,
             species=species,
+            template_prefix=template_prefix,
             catalyst=catalyst_name,
             mode=mode,
             opt_output_path=opt_output_path,
-            system_dir=system_dir  # Pass system_dir to locate catalyst/substrate templates
+            system_dir=system_dir,
+            calc_type=calc_type
         )
         
         if not molecule_section:
@@ -689,14 +685,10 @@ def process_input_files(config_manager, system_dir: Path, mode: str = "generate"
         # For generate mode, build and write the file
         sanitized, original = config_manager.get_common_values(method, bs, file_mode)
         
-        # Get molecule template path
-        template_name = f"{template_prefix}{species}"
-        molecule_template_path = templates_dir / "molecule" / f"{template_name}.xyz"
-        
         build_and_write_input_file(
             system_dir=system_dir, sanitized=sanitized, original=original,
             category=category, branch=branch, species=species, calc_type=calc_type,
-            template_base_path=base_template_path, molecule_template_path=molecule_template_path,
+            template_base_path=base_template_path, template_prefix=template_prefix,
             molecule_proc_fn=molecule_fn, catalyst_name=catalyst_name, mode=file_mode,
             overwrite=overwrite, sp_strategy=sp_strategy
         )
