@@ -27,7 +27,11 @@ def _get_components(raw_data: List[Dict[str, Any]]) -> Dict[str, List[str]]:
 
 
 def _build_energy_lookup(raw_data: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
-    """Build energy lookup table with support for calculation-specific keys."""
+    """Build energy lookup table with support for calculation-specific keys.
+    
+    Supports both OPT data (E and G) and SP-only data (E only).
+    For SP-only data, G will be None and those profiles will be skipped during filtering.
+    """
     energy_lookup = {}
     
     for data in raw_data:
@@ -37,9 +41,10 @@ def _build_energy_lookup(raw_data: List[Dict[str, Any]]) -> Dict[str, Dict[str, 
         
         # Get energy values
         e_val = data.get("E (kcal/mol)") or data.get("SP_E (kcal/mol)")
-        g_val = data.get("G (kcal/mol)")
+        g_val = data.get("G (kcal/mol)")  # May be None for SP-only data
         
-        if e_val is not None and g_val is not None:
+        # Require at least E value (G is optional for SP-only calculations)
+        if e_val is not None:
             calc_type = data.get("Calc_Type", "")
             
             # Create calc_type-specific key if calc_type exists
@@ -92,7 +97,9 @@ def _create_stage(stage_name: str, species_list: List[str], energy_lookup: Dict[
     if not species_list:
         return None
     
-    total_e = total_g = 0.0
+    total_e = 0.0
+    total_g = 0.0
+    has_g_data = True  # Track if all species have G values
     calc_types = calc_types or [None] * len(species_list)
     
     # Sum energies for all species
@@ -100,8 +107,14 @@ def _create_stage(stage_name: str, species_list: List[str], energy_lookup: Dict[
         energy = _get_energy(species, energy_lookup, calc_type)
         if not energy:
             return None
+        
         total_e += energy["E"]
-        total_g += energy["G"]
+        
+        # Handle G being None for SP-only data
+        if energy["G"] is None:
+            has_g_data = False
+        else:
+            total_g += energy["G"]
     
     # Get primary calc_type with sanity check
     non_empty_calc_types = [ct for ct in calc_types if ct]
@@ -122,7 +135,7 @@ def _create_stage(stage_name: str, species_list: List[str], energy_lookup: Dict[
         "Calc_Type": primary_calc_type,
         "Species": " + ".join(species_list),
         "E (kcal/mol)": total_e,
-        "G (kcal/mol)": total_g,
+        "G (kcal/mol)": total_g if has_g_data else None,  # None if no G data available
         "Source": source
     }
 
@@ -232,8 +245,18 @@ def _generate_catalyst_profile(catalyst: str, raw_data: List[Dict[str, Any]], co
 
 
 def _filter_profile(profile: List[Dict[str, Any]], energy_type: str) -> List[Dict[str, Any]]:
-    """Smart filtering: Group by stage, find min full_cat, keep same species for pol/frz_cat."""
+    """Smart filtering: Group by stage, find min full_cat, keep same species for pol/frz_cat.
+    
+    For SP-only data without G values, returns empty list when filtering by G.
+    """
     energy_key = f"{energy_type} (kcal/mol)"
+    
+    # Check if any stage has the required energy type (skip G filtering for SP-only data)
+    has_energy_data = any(stage.get(energy_key) is not None for stage in profile)
+    if not has_energy_data:
+        logging.info(f"Skipping {energy_type} profile filtering - no {energy_type} data available (SP-only data)")
+        return []
+    
     stage_groups = {}
     
     # Group by stage name (e.g., "Reactants", "preTS", "TS", etc.)
@@ -339,6 +362,13 @@ def process_all_profiles(raw_data: Dict[str, Dict[str, List[Dict[str, Any]]]]) -
         # Process profiles for each data type (opt/sp)
         for data_key in ["opt_data", "sp_data"]:
             if combo_data.get(data_key):
-                processed_data[combo_name]["profiles"][data_key] = extract_profiles(combo_data[data_key], filter_duplicates=True)
+                calc_type = "OPT" if data_key == "opt_data" else "SP"
+                logging.info(f"Generating profiles for {calc_type} data in {combo_name}")
+                profiles = extract_profiles(combo_data[data_key], filter_duplicates=True)
+                if profiles:
+                    logging.info(f"  Generated profiles for {len(profiles)} catalysts: {list(profiles.keys())}")
+                else:
+                    logging.warning(f"  No profiles generated for {calc_type} data (check if catalyst metadata exists)")
+                processed_data[combo_name]["profiles"][data_key] = profiles
     
     return processed_data

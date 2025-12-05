@@ -146,6 +146,10 @@ def _define_profiles(energy_dict: Dict[str, float]) -> List[Dict[str, Any]]:
         else:
             logging.info(f"Skipping {prof['name']} profile - missing stages: {missing_keys}")
     
+    # If no profiles are valid, log available keys for debugging
+    if not valid_profiles:
+        logging.info(f"No complete profiles can be plotted. Available energy keys: {sorted(energy_dict.keys())}")
+    
     return valid_profiles
 
 
