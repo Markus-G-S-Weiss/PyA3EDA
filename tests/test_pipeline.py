@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from pya3eda.config import Config, LevelConfig, SpeciesConfig, TheoryConfig
+from pya3eda.errors import RunOptionError
 from pya3eda.pipeline import _Pipeline, run_pipeline
 from pya3eda.registry import CalcRegistry
 from pya3eda.runner.clusters import ClusterConfig, QChemVersion
@@ -136,6 +137,38 @@ class TestEndToEnd:
         _run(registry, tpl, base, be)
         assert list(base.rglob("*_sp.in")) == []  # failed OPTs → no SP inputs built
 
+    def test_slurm_default_is_uncapped(
+        self, project: tuple[CalcRegistry, Path, Path], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        registry, tpl, base = project
+
+        class SlurmNamedBackend(FakeBackend):
+            name = "slurm"
+
+        be = SlurmNamedBackend()
+        with caplog.at_level("INFO"):
+            _run(registry, tpl, base, be)  # no max_cores → no cap on slurm
+        assert "no core cap" in caplog.text
+        assert len(list(base.rglob("*_opt.out"))) == 3  # everything still ran to completion
+
+    def test_oversized_job_rejected_upfront(self, project: tuple[CalcRegistry, Path, Path]) -> None:
+        registry, tpl, base = project
+        be = FakeBackend()
+        with (
+            patch("pya3eda.pipeline.detect_cluster", return_value=("g2", _cluster())),
+            patch("pya3eda.pipeline.get_backend", return_value=be),
+            pytest.raises(RunOptionError, match="a single job needs 2 cores"),
+        ):
+            run_pipeline(
+                registry,
+                base,
+                template_dir=tpl,
+                options=RunOptions(cpus=2),
+                plots=False,
+                max_cores=1,
+            )
+        assert be.submitted == []  # rejected before anything was submitted
+
 
 # ===================================================================
 # Scheduler branches
@@ -143,7 +176,13 @@ class TestEndToEnd:
 
 
 def _pipeline(
-    registry: CalcRegistry, base: Path, tpl: Path, be: FakeBackend, **kw: Any
+    registry: CalcRegistry,
+    base: Path,
+    tpl: Path,
+    be: FakeBackend,
+    *,
+    opt_criteria: str = "NOFILE",
+    **kw: Any,
 ) -> _Pipeline:
     return _Pipeline(
         registry,
@@ -155,7 +194,7 @@ def _pipeline(
         opts=RunOptions(),
         template_dir=tpl,
         overwrite=None,
-        opt_criteria="NOFILE",
+        opt_criteria=opt_criteria,
         extract_criteria="SUCCESSFUL",
         **kw,
     )
@@ -205,7 +244,9 @@ class TestSchedulerBranches:
         pipe._submit_ready()
         assert be.submitted == []
 
-    def test_seed_skips_unsuccessful_opt(self, project: tuple[CalcRegistry, Path, Path]) -> None:
+    def test_seed_skips_unsuccessful_opt(
+        self, project: tuple[CalcRegistry, Path, Path], caplog: pytest.LogCaptureFixture
+    ) -> None:
         registry, tpl, base = project
         pipe = _pipeline(registry, base, tpl, FakeBackend())
         opt = next(s for s in registry.all_calcs if s.id.mode == "opt" and s.id.species == "mol_a")
@@ -213,9 +254,25 @@ class TestSchedulerBranches:
         opt.input_path.parent.mkdir(parents=True, exist_ok=True)
         opt.input_path.write_text("$rem\n$end\n")
         opt.output_path.write_text("Running on host\nstill going\n")
-        pipe._seed()
+        with caplog.at_level("WARNING"):
+            pipe._seed()
         assert opt not in pipe.ready
         assert opt.id not in pipe.extracted
+        # Each skip is loud, plus a summary — a drained pipeline must be explainable.
+        assert "its SP(s) will not run" in caplog.text
+        assert "skipped at seed time" in caplog.text
+
+    def test_seed_criteria_crash_requeues_crashed_opt(
+        self, project: tuple[CalcRegistry, Path, Path]
+    ) -> None:
+        registry, tpl, base = project
+        pipe = _pipeline(registry, base, tpl, FakeBackend(), opt_criteria="CRASH")
+        opt = next(s for s in registry.all_calcs if s.id.mode == "opt" and s.id.species == "mol_a")
+        opt.input_path.parent.mkdir(parents=True, exist_ok=True)
+        opt.input_path.write_text("$rem\n$end\n")
+        opt.output_path.write_text("Running on host\nSCF failed to converge\n")
+        pipe._seed()
+        assert opt in pipe.ready  # crashed OPT matches --criteria CRASH → resubmitted
 
     def test_enqueue_skips_unbuilt_sp(self, tmp_path: Path) -> None:
         # Template dir has the base template + rem but NO molecule XYZ → SP build fails.

@@ -67,7 +67,7 @@ pya3eda run config.yaml [CRITERIA] [--backend auto|local|slurm] [--max-cores N] 
 |----------------|----------|--------------------------------------------------------------------|
 | `CRITERIA`     | `NOFILE` | Status filter for which jobs to submit (positional)                |
 | `--backend`    | `auto`   | `auto` (SLURM if `sbatch` is present, else `local`), `local`, `slurm` |
-| `--max-cores`  | CPU count | Core budget for throttled submission                              |
+| `--max-cores`  | no cap (SLURM) / host cores (local) | Cap on concurrently running cores; submission pauses while the cap is full |
 | `--wait`       | off      | Block until all jobs finish (implied for the `local` backend)      |
 
 Job options (passed to the Q-Chem SLURM/bash script): `-c/--cpus`, `-p/--parallel`,
@@ -75,9 +75,16 @@ Job options (passed to the Q-Chem SLURM/bash script): `-c/--cpus`, `-p/--paralle
 `-v/--qchem-version`, `--qcsetup`, `-s/--scratch`, `-N/--node`, `-x/--exclude`, `--save`,
 `-f/--save-all`, `--save-scratch`, `-F/--force`.
 
-The default SLURM path submits and returns; `--wait` (and the local backend) throttle
-submissions to `--max-cores` and block until completion. Cluster settings are read from
-`$QQCHEM_CLUSTERS` or `~/.config/qqchem/clusters.yaml`.
+`--max-cores` and `--wait` are independent. With neither flag, the SLURM path is
+fire-and-forget: every job is submitted and the command returns. `--max-cores N`
+throttles submission — jobs are submitted until N cores' worth are in flight, then
+the CLI polls `squeue` and submits the next as cores free — and returns right after
+the last submission. `--wait` additionally blocks until every job has finished.
+The local backend always throttles (to the host's usable cores unless `--max-cores`
+is given) and always waits. A single job larger than the cap (`--cpus`/`--parallel`
+vs `--max-cores`) is rejected up front with exit code 6 before anything is
+submitted. Cluster settings are read from `$QQCHEM_CLUSTERS` or
+`~/.config/qqchem/clusters.yaml`.
 
 Jobs go to SLURM **one at a time**: after each `sbatch`, PyA3EDA waits for the
 controller to list the job in `squeue` before submitting the next, so a big run is
@@ -98,19 +105,33 @@ calculations already SUCCESSFUL are skipped (an already-done OPT goes straight t
 its SPs).
 
 ```bash
-pya3eda pipeline config.yaml [--max-cores N] [--template-dir DIR] [--overwrite] [--no-plots] [JOB OPTIONS...]
+pya3eda pipeline config.yaml [--criteria CRITERIA] [--max-cores N] [--template-dir DIR] [--overwrite] [--no-plots] [JOB OPTIONS...]
 ```
 
 | Option           | Default     | Description                                  |
 |------------------|-------------|----------------------------------------------|
-| `--max-cores`    | CPU count   | Core budget for throttled submission         |
+| `--criteria`     | `NOFILE`    | Status filter for which OPTs to (re)submit — same vocabulary as `run` (`NOFILE`, `CRASH`, `all`, …) |
+| `--max-cores`    | no cap (SLURM) / host cores (local) | Cap on concurrently running cores |
 | `--template-dir` | `templates` | Template directory (OPT/SP inputs are built) |
 | `--overwrite`    | off         | Rebuild existing input files                 |
 | `--no-plots`     | off         | Skip plot generation in the final extract    |
 
-Accepts the same backend (`--backend`) and job options as `run`. The local backend
-runs jobs in the background under the core budget; SLURM submits via `sbatch` and
-polls `squeue`.
+Accepts the same backend (`--backend`) and job options as `run`. The pipeline
+always blocks until the whole campaign finishes (run it inside `tmux` or under
+`nohup … &` for long campaigns); the local backend runs jobs in the background
+under the core budget, SLURM submits via `sbatch` and polls `squeue`. A single
+job larger than `--max-cores` is rejected up front with exit code 6, before
+anything is submitted.
+
+An OPT whose output exists but is not `SUCCESSFUL` — crashed, killed, or still
+running from an earlier `run` — does **not** match the default `NOFILE` filter:
+it is skipped (with a warning per OPT and a summary), and its single points are
+skipped with it. `--criteria` matches one status exactly (`pya3eda status`
+shows each OPT's status: a crashed one is `CRASH`, a queue-killed one
+`terminated`), and a non-default filter also excludes OPTs that have never run
+— so rerun crashed OPTs with `--criteria CRASH`, or delete stale outputs so
+the default `NOFILE` picks them up. Already-`SUCCESSFUL` OPTs always skip
+straight to their SPs regardless of the filter.
 
 ---
 

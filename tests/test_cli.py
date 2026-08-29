@@ -99,6 +99,13 @@ class TestParsingAndDispatch:
         assert kwargs["max_cores"] == 2
         assert kwargs["plots"] is False
         assert kwargs["options"].cpus == 4
+        assert kwargs["opt_criteria"] == "NOFILE"
+
+    def test_pipeline_passes_criteria(self, config_path: Path) -> None:
+        with patch("pya3eda.pipeline.run_pipeline") as mock_rp:
+            result = runner.invoke(app, ["pipeline", str(config_path), "--criteria", "CRASH"])
+        assert result.exit_code == 0
+        assert mock_rp.call_args.kwargs["opt_criteria"] == "CRASH"
 
     def test_status_calls_check_all(self, config_path: Path) -> None:
         with patch("pya3eda.status.checker.check_all") as mock_ca:

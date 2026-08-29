@@ -1,11 +1,16 @@
 """Job submission orchestration over the registry.
 
 ``run_all`` picks an execution backend (local bash / SLURM), assembles a
-Q-Chem script per matching calculation, and submits it. Under ``--wait`` (and
-always for local, whose background processes die with the CLI) submissions are
-bounded by a CPU-core :class:`~pya3eda.runner.throttle.Throttler` and the call
-blocks until every job finishes; the default SLURM path stays fire-and-forget
-(submit and return, preserving the staged build→run→status→extract workflow).
+Q-Chem script per matching calculation, and submits it. Two orthogonal flags
+shape the run: ``--max-cores`` caps how many cores' worth of jobs are in
+flight at once (submission pauses while the cap is full), and ``--wait``
+blocks until every job finishes. Either works alone: a capped no-wait run
+returns right after the last submission, and the default SLURM path with
+neither flag stays fire-and-forget (submit and return, preserving the staged
+build→run→status→extract workflow). The local backend always throttles and
+waits — its job accounting (the :class:`~pya3eda.runner.throttle.Throttler`
+and the backend's process table) lives only in this process's memory, so
+returning early would abandon the budget and leave nothing to reap the jobs.
 
 Submission is one job at a time either way — the loop below is sequential, and
 the SLURM backend additionally waits for the controller to acknowledge each job
@@ -16,7 +21,6 @@ at a scheduler that is already struggling.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 
 from pya3eda.errors import RunOptionError
@@ -82,14 +86,26 @@ def run_all(
     opts = options or RunOptions()
     cluster_name, cluster = detect_cluster()
     be = get_backend(backend)
-    must_wait = wait or be.name == "local"
-    throttler = None
-    if must_wait:
-        from pya3eda.runner.throttle import Throttler
+    from pya3eda.runner.throttle import Throttler, ensure_job_fits, resolve_budget
 
-        budget = max_cores if max_cores is not None else (os.cpu_count() or 1)
-        throttler = Throttler(max_cores=budget)
-        log.info("Throttling submissions to %d cores (%s backend)", budget, be.name)
+    budget = resolve_budget(max_cores, backend_name=be.name)
+    ensure_job_fits(cores_for_options(opts), budget)
+    must_wait = wait or be.name == "local"
+    throttler = Throttler(max_cores=budget) if budget is not None or must_wait else None
+    if be.name == "local":
+        log.info("Local backend: throttling to %d cores and waiting for completion", budget)
+    elif budget is not None and must_wait:
+        log.info("Throttling submissions to %d cores and waiting for completion", budget)
+    elif budget is not None:
+        log.info(
+            "Throttling submissions to %d cores; returning after the last submission "
+            "(add --wait to block until completion)",
+            budget,
+        )
+    elif must_wait:
+        log.info("No --max-cores: submitting all jobs unthrottled, then waiting for completion")
+    else:
+        log.info("Fire-and-forget submission (no core cap; use --max-cores to throttle)")
 
     count = 0
     for spec in registry.all_calcs:
@@ -110,7 +126,7 @@ def run_all(
             throttler.register(job_id, cores)
         count += 1
 
-    if throttler is not None:
+    if throttler is not None and must_wait:
         throttler.wait_all(is_finished=be.is_finished)
 
     log.info("Total jobs submitted: %d", count)
@@ -200,6 +216,19 @@ def cores_for(job: JobSpec) -> int:
     if job.parallel_type == "openmpi":
         return job.qchem_processors * job.cpus
     return job.cpus
+
+
+def cores_for_options(opts: RunOptions) -> int:
+    """Cores every job of this run will charge — known before any job is built.
+
+    Cores-per-job is fixed by the run options alone, which lets callers reject
+    an over-budget configuration up front (``ensure_job_fits``) instead of
+    failing mid-run.
+    """
+    cpus, qchem_processors = _resolve_parallel(opts)
+    if opts.parallel_type == "openmpi":
+        return qchem_processors * cpus
+    return cpus
 
 
 def _apply_memory(

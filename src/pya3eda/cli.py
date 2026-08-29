@@ -88,7 +88,12 @@ BackendOpt = Annotated[
     str, typer.Option("--backend", help="Execution backend: auto, local, or slurm.")
 ]
 MaxCoresOpt = Annotated[
-    int | None, typer.Option("--max-cores", help="Core budget for throttled submission.")
+    int | None,
+    typer.Option(
+        "--max-cores",
+        help="Cap on concurrently running cores; submission pauses while the cap is full. "
+        "Default: no cap on SLURM, host cores locally.",
+    ),
 ]
 CpusOpt = Annotated[int, typer.Option("-c", "--cpus", help="CPUs per task (threads).")]
 ParallelOpt = Annotated[int | None, typer.Option("-p", "--parallel", help="MPI processes.")]
@@ -242,7 +247,11 @@ def run(
     save_scratch: SaveScratchOpt = False,
     force: ForceOpt = False,
     wait: Annotated[
-        bool, typer.Option("--wait", help="Block until all jobs finish (implied for local).")
+        bool,
+        typer.Option(
+            "--wait",
+            help="Block until all jobs finish (implied for local; independent of --max-cores).",
+        ),
     ] = False,
 ) -> None:
     """Submit calculations via the local or SLURM backend."""
@@ -306,6 +315,13 @@ def extract(
 @app.command()
 def pipeline(
     config_path: ConfigArg,
+    criteria: Annotated[
+        str,
+        typer.Option(
+            "--criteria",
+            help="Status filter for which OPTs to (re)submit: NOFILE (default), CRASH, all, …",
+        ),
+    ] = "NOFILE",
     backend: BackendOpt = "auto",
     max_cores: MaxCoresOpt = None,
     cpus: CpusOpt = 1,
@@ -340,6 +356,7 @@ def pipeline(
             base_dir,
             backend=backend,
             max_cores=max_cores,
+            opt_criteria=criteria,
             options=_run_options(
                 cpus=cpus,
                 parallel=parallel,

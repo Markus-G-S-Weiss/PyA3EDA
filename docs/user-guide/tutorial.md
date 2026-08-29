@@ -223,19 +223,21 @@ All output lands in `results/{method_key}/`.
 ### One command: `pipeline`
 
 The four steps above can also run as a single dependency-aware pass.
-`pipeline` builds the OPT inputs, submits them under a `--max-cores`
-budget, builds and submits each single-point as soon as its OPT
-converges, extracts results as jobs finish, and produces the final
-CSVs and plots once everything completes:
+`pipeline` builds the OPT inputs, submits them (capped at `--max-cores`
+concurrent cores if given), builds and submits each single-point as soon
+as its OPT converges, extracts results as jobs finish, and produces the
+final CSVs and plots once everything completes. It blocks for the whole
+campaign, so run it inside `tmux` or under `nohup`:
 
 ```bash
-pya3eda pipeline config.yaml --max-cores 16
+nohup pya3eda pipeline config.yaml --max-cores 16 > pipeline.log 2>&1 &
 ```
 
 Use the staged `build` / `run` / `status` / `extract` commands when you
 want manual control between steps; use `pipeline` for an unattended
 end-to-end run. It is resumable — already-converged OPTs skip straight
-to their single-points.
+to their single-points, and crashed ones can be resubmitted with
+`--criteria CRASH`.
 
 ---
 
