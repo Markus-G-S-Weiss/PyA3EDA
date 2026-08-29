@@ -1,17 +1,76 @@
-"""Tests for pya3eda.runner.throttle.Throttler."""
+"""Tests for pya3eda.runner.throttle (budget policy + Throttler)."""
 
 from __future__ import annotations
 
 import pytest
 
 from pya3eda.errors import RunOptionError
-from pya3eda.runner.throttle import Throttler, ThrottleTimeoutError
+from pya3eda.runner.throttle import (
+    Throttler,
+    ThrottleTimeoutError,
+    _usable_cpus,
+    ensure_job_fits,
+    resolve_budget,
+)
+
+
+class TestResolveBudget:
+    def test_explicit_value_used(self) -> None:
+        assert resolve_budget(16, backend_name="slurm") == 16
+        assert resolve_budget(16, backend_name="local") == 16
+
+    def test_rejects_nonpositive(self) -> None:
+        with pytest.raises(RunOptionError, match="max_cores must be"):
+            resolve_budget(0, backend_name="slurm")
+
+    def test_slurm_default_is_unbounded(self) -> None:
+        assert resolve_budget(None, backend_name="slurm") is None
+
+    def test_local_default_is_host_cores(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("pya3eda.runner.throttle._usable_cpus", lambda: 7)
+        assert resolve_budget(None, backend_name="local") == 7
+
+    def test_usable_cpus_normal(self) -> None:
+        assert _usable_cpus() >= 1
+
+    def test_usable_cpus_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _raise(_pid: int) -> set[int]:
+            raise OSError("no affinity on this platform")
+
+        monkeypatch.setattr("pya3eda.runner.throttle.os.sched_getaffinity", _raise, raising=False)
+        monkeypatch.setattr("pya3eda.runner.throttle.os.cpu_count", lambda: None)
+        assert _usable_cpus() == 1  # affinity unavailable → cpu_count → final 1
+
+
+class TestEnsureJobFits:
+    def test_fits(self) -> None:
+        ensure_job_fits(4, 4)  # exactly at the budget → fine
+        ensure_job_fits(4, None)  # unbounded → always fits
+
+    def test_oversized_rejected(self) -> None:
+        with pytest.raises(RunOptionError, match="a single job needs 8 cores"):
+            ensure_job_fits(8, 4)
 
 
 class TestConstruction:
     def test_rejects_zero_cores(self) -> None:
         with pytest.raises(RunOptionError, match="max_cores must be"):
             Throttler(max_cores=0)
+
+    def test_unbounded_never_blocks(self) -> None:
+        t = Throttler(max_cores=None)
+        t.register("j1", 128)
+        assert t.has_room(1024)
+        t.wait_for_room(1024, is_finished=lambda _j: False)  # returns despite j1 running
+
+
+class TestHasRoom:
+    def test_room_accounting(self) -> None:
+        t = Throttler(max_cores=8)
+        assert t.has_room(8)
+        t.register("j1", 4)
+        assert t.has_room(4)
+        assert not t.has_room(5)
 
 
 class TestRegisterAndState:

@@ -17,6 +17,7 @@ from pya3eda.runner.executor import (
     _resolve_parallel,
     _resolve_version,
     cores_for,
+    cores_for_options,
     run_all,
 )
 
@@ -157,18 +158,57 @@ class TestRunAll:
             assert run_all(reg, criteria="all") == 0
         assert be.submitted == []
 
-    def test_max_cores_defaults_to_cpu_count(self, tmp_path: Path) -> None:
+    def test_local_budget_defaults_to_host_cores(self, tmp_path: Path) -> None:
         reg = MagicMock(all_calcs=[_spec(tmp_path)])
         be = FakeBackend("local")
         with (
             patch.object(executor, "detect_cluster", return_value=("g2", _cluster())),
             patch.object(executor, "get_backend", return_value=be),
             patch.object(executor, "should_process", return_value=True),
-            patch.object(
-                executor.os, "cpu_count", return_value=None
-            ),  # exercise the `or 1` fallback
+            patch("pya3eda.runner.throttle._usable_cpus", return_value=7),
+            patch("pya3eda.runner.throttle.Throttler") as throttler_cls,
         ):
             assert run_all(reg, criteria="all") == 1
+        throttler_cls.assert_called_once_with(max_cores=7)
+
+    def test_slurm_max_cores_without_wait_throttles_submission(self, tmp_path: Path) -> None:
+        reg = MagicMock(all_calcs=[_spec(tmp_path)])
+        be = FakeBackend("slurm")
+        with (
+            patch.object(executor, "detect_cluster", return_value=("g2", _cluster())),
+            patch.object(executor, "get_backend", return_value=be),
+            patch.object(executor, "should_process", return_value=True),
+            patch("pya3eda.runner.throttle.Throttler") as throttler_cls,
+        ):
+            assert run_all(reg, criteria="all", wait=False, max_cores=8) == 1
+        throttler_cls.assert_called_once_with(max_cores=8)
+        throttler_cls.return_value.wait_for_room.assert_called_once()
+        throttler_cls.return_value.wait_all.assert_not_called()  # returns after last submit
+
+    def test_slurm_wait_without_max_cores_is_unbounded(self, tmp_path: Path) -> None:
+        reg = MagicMock(all_calcs=[_spec(tmp_path)])
+        be = FakeBackend("slurm")
+        with (
+            patch.object(executor, "detect_cluster", return_value=("g2", _cluster())),
+            patch.object(executor, "get_backend", return_value=be),
+            patch.object(executor, "should_process", return_value=True),
+            patch("pya3eda.runner.throttle.Throttler") as throttler_cls,
+        ):
+            assert run_all(reg, criteria="all", wait=True) == 1
+        throttler_cls.assert_called_once_with(max_cores=None)
+        throttler_cls.return_value.wait_all.assert_called_once()
+
+    def test_oversized_job_rejected_before_submission(self, tmp_path: Path) -> None:
+        reg = MagicMock(all_calcs=[_spec(tmp_path)])
+        be = FakeBackend("slurm")
+        with (
+            patch.object(executor, "detect_cluster", return_value=("g2", _cluster())),
+            patch.object(executor, "get_backend", return_value=be),
+            patch.object(executor, "should_process", return_value=True),
+            pytest.raises(RunOptionError, match="a single job needs 4 cores"),
+        ):
+            run_all(reg, criteria="all", max_cores=2, options=RunOptions(cpus=4))
+        assert be.submitted == []
 
 
 # ===================================================================
@@ -226,6 +266,12 @@ class TestCores:
             cluster_name="c",
         )
         assert cores_for(spec) == 6
+
+    def test_options_openmp(self) -> None:
+        assert cores_for_options(RunOptions(cpus=4)) == 4
+
+    def test_options_openmpi(self) -> None:
+        assert cores_for_options(RunOptions(parallel_type="openmpi", cpus=2, parallel=3)) == 6
 
 
 class TestResolveVersion:

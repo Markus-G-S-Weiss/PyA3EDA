@@ -8,6 +8,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`pipeline --criteria`**: the pipeline's OPT (re)submission filter is now a
+  CLI option (default `NOFILE`, same vocabulary as `run`), so crashed OPTs can
+  be rerun with `--criteria CRASH` instead of deleting their outputs by hand.
+  An OPT skipped at seed time (output exists but not `SUCCESSFUL`) is now
+  warned about — per OPT plus a summary — instead of silently dropping its
+  whole SP branch.
 - Reinstated the EDA single-point ↔ OPT **CDS cross-check**: when an EDA SMD
   single point's cavity-dispersion-solvent term disagrees with its optimisation's
   (beyond 1 kcal/mol·10⁻³) a warning is logged, surfacing mismatched geometries.
@@ -21,6 +27,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`--max-cores` and `--wait` are now independent**: `run --max-cores N` on
+  SLURM throttles submission even without `--wait` (previously the flag was
+  silently ignored there), returning after the last submission; `--wait` alone
+  submits everything and blocks until completion. Budget defaults are
+  backend-aware — no cap on SLURM (the scheduler manages the cluster; the old
+  default capped runs at the *login node's* core count), usable host cores
+  locally — and a single job larger than the budget now fails up front with
+  exit code 6 in both `run` and `pipeline`, instead of raising mid-run or
+  being silently over-subscribed.
 - **SLURM submissions are acknowledgement-gated**: each `sbatch` now waits for the
   controller to list the job in `squeue` before the next one fires, so a large run
   is paced by the scheduler's real responsiveness instead of hammering it (or

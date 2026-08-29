@@ -15,7 +15,6 @@ straight to its SP(s).
 from __future__ import annotations
 
 import logging
-import os
 import time
 from collections import deque
 from pathlib import Path
@@ -26,8 +25,14 @@ from pya3eda.ids import CalcID, CalcSpec, ExtractedData
 from pya3eda.registry import CalcRegistry
 from pya3eda.runner.backend import ExecutionBackend, get_backend
 from pya3eda.runner.clusters import ClusterConfig, detect_cluster
-from pya3eda.runner.executor import RunOptions, cores_for, prepare_job, submit_job
-from pya3eda.runner.throttle import Throttler
+from pya3eda.runner.executor import (
+    RunOptions,
+    cores_for,
+    cores_for_options,
+    prepare_job,
+    submit_job,
+)
+from pya3eda.runner.throttle import Throttler, ensure_job_fits, resolve_budget
 from pya3eda.status.checker import Status, get_status, should_process
 from pya3eda.vocab import Mode
 
@@ -82,7 +87,14 @@ class _Pipeline:
         return self.extracted
 
     def _seed(self) -> None:
-        """Queue OPTs that need running; complete (extract + enqueue SPs) already-done OPTs."""
+        """Queue OPTs that need running; complete (extract + enqueue SPs) already-done OPTs.
+
+        An OPT that is neither SUCCESSFUL nor matched by the criteria — e.g. a
+        crashed or still-running one under the default ``NOFILE`` — is skipped,
+        and with it its whole SP branch; each skip is warned about so a
+        pipeline that drains immediately is explainable from the log.
+        """
+        skipped = 0
         for spec in self.registry.all_calcs:
             if spec.id.mode != Mode.OPT:
                 continue
@@ -91,6 +103,21 @@ class _Pipeline:
                 self._complete(spec)
             elif should_process(spec, self.opt_criteria):
                 self.ready.append(spec)
+            else:
+                skipped += 1
+                log.warning(
+                    "OPT %s skipped: status %s does not match criteria %r — its SP(s) will not run",
+                    spec.id,
+                    status.value,
+                    self.opt_criteria,
+                )
+        if skipped:
+            log.warning(
+                "%d OPT(s) skipped at seed time (status did not match criteria %r); "
+                "adjust --criteria to the status reported above, or delete stale outputs",
+                skipped,
+                self.opt_criteria,
+            )
 
     def _loop(self) -> None:
         """Submit ready jobs under the budget, reap completions, until everything drains."""
@@ -103,7 +130,11 @@ class _Pipeline:
                 time.sleep(self.throttler.poll_interval)
 
     def _submit_ready(self) -> None:
-        """Submit queued specs while the core budget allows (never deadlock when idle)."""
+        """Submit queued specs while the core budget allows.
+
+        No deadlock risk: ``ensure_job_fits`` proved before the run started
+        that any single job fits the budget, so a full budget always drains.
+        """
         while self.ready:
             spec = self.ready[0]
             if not spec.input_path.exists():
@@ -115,9 +146,8 @@ class _Pipeline:
                 self.ready.popleft()
                 continue
             cores = cores_for(job)
-            in_use = self.throttler.cores_in_use
-            if in_use and in_use + cores > self.throttler.max_cores:
-                break  # busy and won't fit → wait for running jobs to finish
+            if not self.throttler.has_room(cores):
+                break  # budget full → wait for running jobs to finish
             self.ready.popleft()
             job_id = submit_job(spec, job, self.be)
             self.throttler.register(job_id, cores)
@@ -177,8 +207,16 @@ def run_pipeline(
     """Run the full dependency-aware build→run→SP→extract pipeline to completion."""
     cluster_name, cluster = detect_cluster()
     be = get_backend(backend)
-    budget = max_cores if max_cores is not None else (os.cpu_count() or 1)
-    log.info("Pipeline on %s backend, budget %d cores", be.name, budget)
+    budget = resolve_budget(max_cores, backend_name=be.name)
+    ensure_job_fits(cores_for_options(options or RunOptions()), budget)
+    if budget is not None:
+        log.info("Pipeline on %s backend, budget %d cores", be.name, budget)
+    else:
+        log.info(
+            "Pipeline on %s backend, no core cap "
+            "(SLURM manages concurrency; use --max-cores to throttle)",
+            be.name,
+        )
 
     pipe = _Pipeline(
         registry,
